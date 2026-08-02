@@ -13,7 +13,7 @@
 // 
 // Dependencies: 
 // 
-// Revision: 1.4 - Added the ability to force the contrast to be maxed out all the time with GPIO[1], at the request of Adrian Black
+// Revision: 1.5 - Fixed an issue where the 6504 stack page was set to 0x00 instead of 0x01, causing FDC crashes when running the Twiggy ROMs
 // Additional Comments:
 // 
 //////////////////////////////////////////////////////////////////////////////////

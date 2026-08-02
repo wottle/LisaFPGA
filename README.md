@@ -307,7 +307,6 @@ If you short GPIO0 on the GPIO header to 3V3, it'll spoof the I/O ROM revision t
 
 ### OS Notes
 Most of these notes aren't specific to LisaFPGA (they apply on real Lisas too), but I figured I'd include them since there are some mistakes people make when trying to load certain OSes that will make them fail to boot.
-- LOS 1.0 hangs or errors out very early in boot unless you have the 40 I/O board ROMs selected. And even if you do have the 40 ROMs selected, it'll still hang on the desktop unless you have a real set of Twiggy drives connected.
 - GEM will refuse to boot with more than 1MB of RAM. Make sure to have your RAM size jumpers set to either 512KB or 1MB in order to get it to boot.
 - Xenix requires a 5MB hard disk on a Lisa 2/5 and a 10MB hard disk on a 2/10. LisaFPGA emulates a Lisa 2/5, so you have to use a 5MB Xenix image or else it won't work right, although I did devise a way to get around this and use 10MB images, [as discussed earlier](#what-if-my-software-needs-a-210-in-order-to-run).
 - MacWorks Plus II requires a PFG module in order to function, which plugs into the SCC socket of an original Lisa. But we don't have an SCC socket since the SCC is implemented inside the FPGA, so there's no way to connect a PFG and thus no way to run MacWorks Plus II. But I'm hoping to implement a PFG internally to solve this problem in the future.
@@ -386,12 +385,13 @@ The format of the identity register is as follows:
 - ```LisaFPGA_Identity``` is a "magic number" of ```110``` that identifies the board as a LisaFPGA board.
 - ```Board_Type``` is ```1``` for a LisaFPGA desktop board (the standalone LisaFPGA board) or ```0``` for a LisaFPGA motherboard replacement (the upcoming version that will replace the motherboard of a real Lisa).
 - ```Speed``` is a 2-bit value representing the current speed of the Lisa. The values and corresponding speeds are as follows:
-    | Speed[1:0] | CPU Speed | DOTCK Speed |
-    | ---------- | --------- | ----------- |
-    | 2'b00      | 5MHz      | 20MHz       |
-    | 2'b01      | 10MHz     | 40MHz       |
-    | 2'b10      | 15MHz     | 60MHz       |
-    | 2'b11      | 18.75MHz  | 75MHz       |
+
+| Speed[1:0] | CPU Speed | DOTCK Speed |
+| ---------- | --------- | ----------- |
+| 2'b00      | 5MHz      | 20MHz       |
+| 2'b01      | 10MHz     | 40MHz       |
+| 2'b10      | 15MHz     | 60MHz       |
+| 2'b11      | 18.75MHz  | 75MHz       |
 
 # Future Enhancements
 There are a couple of things that I'd like to (and/or need to) do before I can call the project completely finished:
@@ -403,10 +403,16 @@ Feel free to email me at [alexelectronicsguy@gmail.com](mailto:alexelectronicsgu
 
 # Changelog
 6/6/2026 - Initial LisaFPGA core v1.0 release and v3 PCB release.
+
 6/23/2026 - LisaFPGA core v1.1 - Replaced external SCC with an internal SystemVerilog implementation for the sake of cost savings, easier parts sourcing, and reduced PCB complexity.
+
 6/28/2026 - LisaFPGA core v1.2 - Fixed issues where marginal SRAM chips would sometimes fail at a 75MHz DOTCK and moved the VIAs from the E clock with clock enables to the DOTCK with clock enables to improve timing stability.
+
 7/6/2026 - LisaFPGA core v1.3 - Improved USB keyboard keymappings to better match the original Lisa keyboard; changes courtesy of RebeccaRGB.
+
 7/9/2026 - LisaFPGA core v1.4 - Added the ability to max out the contrast all the time, regardless of the contrast setting. Just short GPIO1 to 3V3!
+
+8/1/3036 - LisaFPGA core v1.5 - Fixed a bug where the FDC 6504's stack page was incorrectly set to 0x01 instead of 0x00, causing the FDC to randomly cold-start itself thanks to the stack overwriting valid data. Somehow this was only a problem in the Twiggy (40) I/O ROMs and didn't cause any issues whatsoever in the Sony (A8) ROMs.
 
 # Appendix - Jumpers, Switches, Buttons, and LEDs
 There are quite a lot of switches, jumpers, buttons, and LEDs on the LisaFPGA board. Here's a table explaining what each one does, along with longer explanations whenever necessary.
