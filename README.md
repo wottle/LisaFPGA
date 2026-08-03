@@ -33,7 +33,7 @@ Ever since taking an introductory FPGA class 2 years ago during undergrad, I've 
 - All the same I/O as the original Lisa, minus the expansion slots.
 - 2MB of RAM, configurable at runtime to anything from 512K up to 2MB.
 - On-the-fly overclocking up to 3.75x the original Lisa's speed.
-- Video and audio output over 1080p HDMI.
+- Video and audio output over 1080p HDMI (a fixed 1024x768@60Hz output mode is also available; see the HDMI troubleshooting section).
 - Onboard speaker if your HDMI monitor doesn't have one.
 - USB keyboard/mouse support (although you can use original Lisa ones too if you want).
 - Onboard ProFile hard disk emulation thanks to an integrated [ESProFile](https://github.com/alexthecat123/ESProFile).
@@ -236,7 +236,13 @@ If the DONE LED never lights up, hit the PROGRAM button right next to it and wai
 
 If you don't get any HDMI output, or your display says that the current resolution isn't supported, try moving the HDMI FRAMERATE jumper to whatever position it's not in right now. Some displays are picky about this and can only display one framerate. If it works in both positions, you want to go with the 60FPS position!
 
-There's also the possibility that your monitor just doesn't support 1080p, and if that's the case, then you'll need to switch to a 1080p-capable monitor. Most monitors won't have a problem with that though.
+There's also the possibility that your monitor just doesn't support 1080p, and if that's the case, then you'll need to switch to a 1080p-capable monitor. Most monitors won't have a problem with that though. Alternatively, if your display is a fixed 1024x768 panel that doesn't support 1080p at all, you can build the FPGA image with the `OUTPUT_1024X768` constant (see below) set, which repurposes the HDMI FRAMERATE jumper's second position to output a native 1024x768@60Hz signal instead of 1080p60.
+
+#### Outputting 1024x768 instead of 1080p
+If you'd rather output a fixed 1024x768@60Hz VESA signal (e.g. for an older 1024x768 monitor that doesn't support 1080p), open `top.sv` and change the `OUTPUT_1024X768` localparam near the top of the module from `1'b0` to `1'b1`, then rebuild (synthesis + implementation). This is a single build-time switch; no other source changes are needed. Note that:
+- Before building with `OUTPUT_1024X768 = 1'b1` for the first time, you need to run `tools/vivado_scripts/add_1024x768_clocks.tcl` once (see the comments at the top of that script for usage) to create the dedicated second Clocking Wizard IP (`hdmi_clock_divider_1024x768`) this mode needs for its pixel and 5x TMDS clocks.
+- **The HDMI FRAMERATE jumper still works in this build**, but it now picks between 1080p30 and 1024x768 instead of between 1080p30 and 1080p60: leave the jumper in its normal 30FPS position for 1080p30 (useful as a fallback if you need to temporarily plug into a 1080p-capable display), or move it to the other position (the one normally labeled 60FPS) to get the 1024x768@60Hz output.
+- 1024x768 mode is currently only fully scaled/centered for H ROM systems (720x364 native resolution, scaled to 960x728 with black borders); 3A ROM systems (608x432) will show a simple centered 1:1 image rather than a properly scaled one in this mode.
 
 Once all of those things have happened, the board is ready for use! 
 
@@ -371,7 +377,7 @@ There are plenty of other sub-modules instantiated within these modules (like th
 
 All of the Lisa's clocks are generated in ```top.sv``` by the ```dotck_mmcm``` (generates the four DOTCKs for the four different overclocks) and ```clock_divider``` (generates all of the other clocks) MMCMs. These take a 125MHz clock from the LisaFPGA board as an input.
 
-Another MMCM called ```hdmi_clock_divider``` exists inside of ```HDMI_Interface.sv``` to generate the dot and audio clocks needed by the 1080p HDMI module.
+Two more MMCMs exist inside of ```HDMI_Interface.sv``` to generate the pixel and audio clocks needed by the HDMI module: ```hdmi_clock_divider``` (the stock 1080p30/1080p60 clocks) and ```hdmi_clock_divider_1024x768``` (the fixed 1024x768@60Hz clocks, on its own dedicated MMCM since its VCO requirements aren't compatible with the 1080p one -- see the comments in `HDMI_Interface.sv` and `tools/vivado_scripts/add_1024x768_clocks.tcl` for why). Both are always generating their clocks simultaneously regardless of build configuration; the ```OUTPUT_1024X768``` constant in ```top.sv``` picks, at synthesis time, whether the HDMI FRAMERATE jumper's second position (runtime-selected via the same BUFGMUX-based mux the stock design already used) maps to 1080p60 or 1024x768.
 
 ## The LisaFPGA Identity Register
 Some software might be interested in seeing whether it's running on a real Lisa or a LisaFPGA board, and I implemented a register that allows you to determine just that!
@@ -417,7 +423,7 @@ There are quite a lot of switches, jumpers, buttons, and LEDs on the LisaFPGA bo
 | LISA POWER                     | Button/LED | The Lisa's soft power switch and corresponding power LED. |
 | RESET                          | Button   | The reset button that you'd find on the back of a real Lisa. Don't press this during normal use unless you know what you're doing; it'll reboot the computer and you'll lose any unsaved work! |
 | NMI                            | Button   | The NMI button that you'd find on the back of a Lisa 2/10. Pressing this will lead to unpredictable results depending on the state of the Lisa, so once again, only hit it if you know what you're doing! |
-| HDMI FRAMERATE                 | Jumper   | Picks whether HDMI outputs video at 30FPS or 60FPS; certain monitors only support one or the other. |
+| HDMI FRAMERATE                 | Jumper   | Picks whether HDMI outputs video at 30FPS or 60FPS; certain monitors only support one or the other. If the FPGA was built with `OUTPUT_1024X768` set, this jumper instead picks between 1080p30 and a fixed 1024x768@60Hz output. |
 | INVERSE VIDEO                  | Jumper   | Inverts the Lisa's video signal (white becomes black, black becomes white) when set to INV, and video is untouched when set to REG. |
 | SCANLINES                      | Jumper   | Inserts simulated scanlines into the video output when ON, and video is untouched when OFF. |
 | SPKR SEL                       | Jumper   | Picks whether audio comes out of the board's speaker (INT) or an external speaker on the SPKR header (EXT). Audio is always sent over HDMI regardless. |

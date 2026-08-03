@@ -185,6 +185,11 @@ module mem_board_2mb(
     end*/
     logic LBDSL_readop_prev;
     logic _CAS_prev;
+    // Declared here (rather than right before the always_comb block further down that drives them) since the
+    // always_ff block immediately below reads them, and Vivado's SystemVerilog parser requires logic declared
+    // before its first use within the module, unlike plain Verilog
+    logic _CAS_sdram;
+    logic _RAS_sdram;
     always_ff @(posedge DOTCK) begin
         if (!LBDSL_readop && LBDSL_readop_prev) begin
             invalid_parity_latched <= 1'b0;
@@ -246,8 +251,6 @@ module mem_board_2mb(
         // 01 = 1MB
         // 10 = 1.5MB
         // 11 = 2MB (all RAM enabled)
-    logic _CAS_sdram;
-    logic _RAS_sdram;
     always_comb begin
         case (RAM_SEL)
             2'b00: begin // 512KB

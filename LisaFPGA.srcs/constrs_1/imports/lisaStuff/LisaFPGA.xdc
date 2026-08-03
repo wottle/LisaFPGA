@@ -81,6 +81,14 @@ set_false_path -to [get_cells io_board/KBD_via_DDRA_extended_int_reg]
 ## We have a synchronizer for this, so we just need to declare a false path for it
 set_false_path -to [get_cells {lisa_hdmi_output/CONT_int_reg[*]}]
 
+## Same deal for TONE and VC, which come from the I/O board in the DOTCK domain and get read in the ~48KHz
+## clk_audio domain to build the audio samples. HDMI_Interface.sv has proper two-stage ASYNC_REG synchronizers
+## on both, so false-path into their first stages. (These only started showing up as hold violations once the
+## clk_audio generated-clock constraint actually applied -- before that clk_audio was unconstrained and these
+## CDC paths simply weren't being analyzed at all. Applies to stock builds equally, not just OUTPUT_1024X768.)
+set_false_path -to [get_cells lisa_hdmi_output/TONE_int_reg]
+set_false_path -to [get_cells {lisa_hdmi_output/VC_int_reg[*]}]
+
 ## We need yet another false path on the I/O board for a really crazy path that never actually happens in real life but Vivado flags
 ## The path is FDC MA bus -> BD_out -> IO_D -> the SCC write registers
 ## Obviously that never happens; we never communicate directly from the FDC to the SCC without the CPU in the middle, so it's a false path
@@ -143,6 +151,11 @@ set_property CLOCK_DEDICATED_ROUTE ANY_CMT_COLUMN [get_nets dotck_B]
 ## But by default, Vivado tries to put the primary clock divider MMCM there instead, so force it into X0Y0 and put our HDMI MMCM in X0Y2
 set_property LOC MMCME2_ADV_X0Y2 [get_cells lisa_hdmi_output/hdmi_clock_generator/inst/mmcm_adv_inst]
 set_property LOC MMCME2_ADV_X0Y0 [get_cells primary_clock_divider/inst/mmcm_adv_inst]
+## We don't explicitly place the 1024x768 MMCM (hdmi_clock_generator_1024x768) anywhere -- it also feeds the same
+## OSERDES via the BUFGMUXes below, but only at 65/325MHz (vs. 148.5/742.5MHz for the stock clocks), so there's much
+## more timing margin to work with even if the placer doesn't put it as close to the OSERDES as X0Y2. If Timing Summary
+## ever shows trouble specifically on the clk_pixel_1024x768/clk_pixel_x5_1024x768 domains, an explicit LOC in whichever
+## CMT column is free may be needed here too.
 
 ## Place the RAM board in the clock region directly adjacent to the SRAM I/O pins (X1Y1) to ensure that the SRAM interface is as fast as possible
 ## Certain unluckily-slow SRAM chips can be borderline too slow to work properly at a 75MHz DOTCK if we don't do this
@@ -168,12 +181,63 @@ set_max_delay -datapath_only 6.0 -to [get_ports _CE_SRAM _OE_SRAM _WE_SRAM _UDS_
 set_clock_groups -name exclusive_dotcks -logically_exclusive -group dotck_20M_dotck_mmcm -group dotck_40M_dotck_mmcm -group dotck_60M_dotck_mmcm -group dotck_80M_dotck_mmcm
 
 ## It's also impossible to go between the 1080p30 and 1080p60 pixel clocks and the x5 pixel clocks, so make exclusive clock groups for them too
-set_clock_groups -name exclusive_pixel_clks -logically_exclusive -group clk_pixel_1080p30 -group clk_pixel_1080p60
-set_clock_groups -name exclusive_5x_pixel_clks -logically_exclusive -group clk_pixel_x5_1080p30 -group clk_pixel_x5_1080p60
+## (These clocks always exist on the MMCMs regardless of OUTPUT_1024X768 -- see HDMI_Interface.sv -- so this constraint is unconditional.
+## clk_pixel_1024x768/clk_pixel_x5_1024x768 come from a separate MMCM than the other four now, but the group names are unaffected
+## since Vivado names these clocks after their IP output port, which we kept identical when we split them out.)
+## NOTE on the 1024x768 clock names: Vivado auto-derives these from the MMCM and names them
+## "<output_port>_<ip_instance>", i.e. clk_pixel_1024x768_hdmi_clock_divider_1024x768 -- NOT the bare port
+## name (the same suffixing you can see on dotck_20M_dotck_mmcm above). Naming them bare makes the group
+## silently match nothing, and the whole point of these constraints is lost: without them Vivado times paths
+## BETWEEN the 1080p and 1024x768 domains through the BUFGMUXes, which can never both be live, producing
+## thousands of phantom violations. Matching with a get_clocks wildcard instead of a hardcoded name so this
+## keeps working if the derived name changes.
+## Which of these clocks actually EXIST depends on the build: in an OUTPUT_1024X768 build the 1080p60 taps
+## are unused (the BUFGMUX's second input is the 1024x768 clock instead), so no clk_pixel_1080p60 clock is
+## derived at all; in a stock build it's the 1024x768 clocks that go unused. Naming a nonexistent clock makes
+## the whole set_clock_groups silently match nothing, so build the group list from whatever is really present.
+## Wildcards matter too: Vivado names the 1024x768 clocks "<port>_<ip_instance>"
+## (clk_pixel_1024x768_hdmi_clock_divider_1024x768), not the bare port name.
+## *** IMPORTANT XDC LIMITATION ***: this Vivado rejects BOTH 'proc' AND 'if' inside an .xdc file
+## ("[Designutils 20-1307] Command 'if' is not supported in the xdc constraint file") -- and it does so as a
+## CRITICAL WARNING that does NOT fail the run, so anything inside such a block silently never applies. Do not
+## use control flow here; write plain unconditional constraints only. (A .tcl file added to the constraints
+## fileset instead of an .xdc would allow full Tcl, if conditional constraints are ever really needed.)
+##
+## Since we can't branch on build type, declare BOTH exclusive pairs unconditionally and let get_clocks -quiet
+## return nothing for whichever pair doesn't exist in this build. The pair that can't resolve logs a benign
+## 12-4739 "no valid object(s)" critical warning and applies nothing; the other one binds normally.
+##   - stock build      -> clk_pixel_1080p60 exists,  clk_pixel_1024x768* does not
+##   - OUTPUT_1024X768  -> clk_pixel_1024x768* exists, clk_pixel_1080p60 does not
+## Vivado names the 1024x768 clocks "<port>_<ip_instance>" (clk_pixel_1024x768_hdmi_clock_divider_1024x768),
+## NOT the bare port name, hence the trailing wildcards.
+set_clock_groups -name exclusive_pixel_clks_1080 -logically_exclusive \
+    -group [get_clocks -quiet {clk_pixel_1080p30}] \
+    -group [get_clocks -quiet {clk_pixel_1080p60}]
+set_clock_groups -name exclusive_5x_pixel_clks_1080 -logically_exclusive \
+    -group [get_clocks -quiet {clk_pixel_x5_1080p30}] \
+    -group [get_clocks -quiet {clk_pixel_x5_1080p60}]
+set_clock_groups -name exclusive_pixel_clks_1024 -logically_exclusive \
+    -group [get_clocks -quiet {clk_pixel_1080p30}] \
+    -group [get_clocks -quiet {clk_pixel_1024x768*}]
+set_clock_groups -name exclusive_5x_pixel_clks_1024 -logically_exclusive \
+    -group [get_clocks -quiet {clk_pixel_x5_1080p30}] \
+    -group [get_clocks -quiet {clk_pixel_x5_1024x768*}]
+
+## The 1024x768 MMCM's two output BUFGs feed the pixel-clock BUFGMUXes below, forming a BUFG->BUFG cascade.
+## Vivado's rule_cascaded_bufg wants those adjacent and cyclic, but (unlike hdmi_clock_divider, which is LOC'd
+## to MMCME2_ADV_X0Y2 near the OSERDES) this MMCM floats, so the placer put its BUFGs down at BUFGCTRL_X0Y8/Y9
+## while the muxes landed at X0Y20/Y21 -- not adjacent, so placement failed. Same situation and same workaround
+## as the dotck_A/dotck_B daisy-chained mux nets above; nobody cares if these intermediate clocks have skew.
+## NOTE: these nets are INSIDE the IP instance ("<ip_instance>/inst/<port_name>"), not at the HDMI_Interface
+## level -- naming them at the wrong level makes get_nets match nothing and the constraint silently do nothing.
+set_property CLOCK_DEDICATED_ROUTE ANY_CMT_COLUMN [get_nets lisa_hdmi_output/hdmi_clock_generator_1024x768/inst/clk_pixel_1024x768]
+set_property CLOCK_DEDICATED_ROUTE ANY_CMT_COLUMN [get_nets lisa_hdmi_output/hdmi_clock_generator_1024x768/inst/clk_pixel_x5_1024x768]
 
 ## Another HDMI-related thing: we need to set false paths for the select signals going into the HDMI clock muxes
 ## They're generated in the "user flipping switches" domain and we can't synchronize them to any of the pixel clock domains since they feed into the clock muxes themselves
 ## So just declare false paths and call it there
+## (The BUFGMUXes and framerate synchronizers are always instantiated regardless of OUTPUT_1024X768 -- only the
+## second BUFGMUX input, and what video_id_code/frame timing that maps to, changes -- see HDMI_Interface.sv)
 set_false_path -to [get_pins lisa_hdmi_output/bufgmux_clk_pixel/CE*]
 set_false_path -to [get_pins lisa_hdmi_output/bufgmux_clk_pixel_x5/CE*]
 
@@ -182,14 +246,33 @@ set_false_path -to [get_pins lisa_hdmi_output/bufgmux_clk_pixel_x5/CE*]
 set_false_path -to [get_cells lisa_hdmi_output/framerate_sel_int_pixel_reg]
 set_false_path -to [get_cells lisa_hdmi_output/framerate_sel_int_pixel_x5_reg]
 
+## Create a constraint for our 48KHz audio clock
+## This is important because we generate it in the logic world, and then move it to a clock net with a BUFG
+## Which source/divide_by is correct depends on which OUTPUT_1024X768 generate branch got elaborated for the
+## audio clock counter in HDMI_Interface.sv (gen_audio_clk_stock or gen_audio_clk_1024x768_fallback) -- only
+## one of the two exists in the design at a time.
+##
+## *** THIS LINE MUST BE SWAPPED BY HAND WHEN YOU FLIP OUTPUT_1024X768 IN top.sv. *** An earlier version of
+## this file tried to pick automatically with an `if`, but XDC silently rejects control flow (see the long
+## note on set_clock_groups above), so NEITHER branch ever applied and clk_audio went completely
+## unconstrained -- which is exactly the sort of failure that produces "non-clocked sequential cell" warnings
+## and a timing report that looks fine while analyzing nothing.
+##
+## ACTIVE: OUTPUT_1024X768 build. The audio counter runs off the actual muxed clk_pixel (74.25MHz for 1080p30
+## or 65MHz for 1024x768, whichever the jumper selects), so constrain it from the BUFGMUX output rather than a
+## fixed reference. divide_by 1354 is the 1024x768-nominal ratio (65MHz/(2*48kHz) = 677.08, so 2*677); with
+## the jumper in the 1080p30 position this is ~6% off nominal, which only costs STA precision on this slow
+## ~48KHz domain (a couple of audio synchronizer flops), not functional correctness.
+create_generated_clock -name clk_audio -source [get_pins lisa_hdmi_output/bufgmux_clk_pixel/O] -divide_by 1354 [get_pins lisa_hdmi_output/buf_audio/O]
+##
+## FOR A STOCK (OUTPUT_1024X768 = 1'b0) BUILD: comment out the line above and uncomment the one below instead.
+## There the audio counter always runs off the fixed 74.25MHz 1080p30 clock, and a single divide_by covers both
+## framerates since 148.5MHz is exactly 2x 74.25MHz.
+# create_generated_clock -name clk_audio -source [get_pins lisa_hdmi_output/hdmi_clock_generator/clk_pixel_1080p30] -divide_by 1546 [get_pins lisa_hdmi_output/buf_audio/O]
+
 ## Make some more false paths going into the Lite Adapter synchronizers for the PH0 and MT signals
 set_false_path -to [get_cells lisa_lite/PH0_int_reg]
 set_false_path -to [get_cells lisa_lite/MT_int_reg]
-
-## Create a constraint for our 48KHz audio clock
-## This is important because we generate it in the logic world, and then move it to a clock net with a BUFG
-## The divide_by is saying that we divide the source clock (which is the 74.25MHz 1080p30 clock) by 1546 to get our 48KHz generated clock
-create_generated_clock -name clk_audio -source [get_pins lisa_hdmi_output/hdmi_clock_generator/clk_pixel_1080p30] -divide_by 1546 [get_pins lisa_hdmi_output/buf_audio/O]
 
 ## And a create_clock constraint for our main 125MHz sysclk signal
 create_clock -period 8.000 -name sys_clk_pin -waveform {0.000 4.000} -add [get_ports sysclk]

@@ -54,7 +54,7 @@ module hdmi
     parameter int START_Y = 0
 )
 (
-    input logic [6:0] video_id_code, // The ID code; either 16 for 1080p60 or 34 for 1080p30. Those are the only 2 accepted for LisaFPGA
+    input logic [6:0] video_id_code, // The ID code: 16 for 1080p60, 34 for 1080p30, or 0 ("no data") for the fixed 1024x768@60Hz VESA mode. LisaFPGA only ever sends one of these three.
     input logic clk_pixel_x5,
     input logic clk_pixel,
     input logic clk_audio,
@@ -90,16 +90,48 @@ logic [11:0] hsync_pulse_start, hsync_pulse_size;
 logic [10:0] vsync_pulse_start, vsync_pulse_size;
 logic invert;
 
-// Hard-code the frame parameters; they don't change since we only support 1080p30 and 1080p60 and they're identical between the two
-assign frame_width = 2200;
-assign frame_height = 1125;
-assign screen_width = 1920;
-assign screen_height = 1080;
-assign hsync_pulse_start = 88;
-assign hsync_pulse_size = 44;
-assign vsync_pulse_start = 4;
-assign vsync_pulse_size = 5;
-assign invert = 0;
+// Frame parameters are picked from video_id_code: 16 = 1080p60 CEA timing, 0 = 1024x768@60Hz VESA DMT timing
+// (LisaFPGA's "no CEA data" sentinel for that mode), and everything else (in practice just 34, 1080p30) falls
+// through to the default case, since 1080p30 and 1080p60 share identical frame geometry
+always_comb begin
+    case (video_id_code)
+        7'd16: begin // 1080p60
+            frame_width = 2200;
+            frame_height = 1125;
+            screen_width = 1920;
+            screen_height = 1080;
+            hsync_pulse_start = 88;
+            hsync_pulse_size = 44;
+            vsync_pulse_start = 4;
+            vsync_pulse_size = 5;
+            invert = 0;
+        end
+        7'd0: begin // 1024x768@60Hz VESA DMT
+            frame_width = 1344;
+            frame_height = 806;
+            screen_width = 1024;
+            screen_height = 768;
+            hsync_pulse_start = 24;
+            hsync_pulse_size = 136;
+            vsync_pulse_start = 3;
+            vsync_pulse_size = 6;
+            // VESA DMT conventionally uses negative sync polarity; verify against a real monitor during
+            // bring-up and flip to 1 here if the display doesn't lock onto the signal
+            invert = 0;
+        end
+        default: begin // 34, 1080p30 (identical frame geometry to 1080p60, just a different pixel clock)
+            frame_width = 2200;
+            frame_height = 1125;
+            screen_width = 1920;
+            screen_height = 1080;
+            hsync_pulse_start = 88;
+            hsync_pulse_size = 44;
+            vsync_pulse_start = 4;
+            vsync_pulse_size = 5;
+            invert = 0;
+        end
+    endcase
+end
 
 always_comb begin
     hsync <= invert ^ (cx >= screen_width + hsync_pulse_start && cx < screen_width + hsync_pulse_start + hsync_pulse_size);

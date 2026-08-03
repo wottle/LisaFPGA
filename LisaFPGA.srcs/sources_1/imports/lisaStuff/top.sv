@@ -151,6 +151,11 @@ module top(
     // It's also exposed as a field in the identity register
     localparam logic LisaFPGA_Desktop = 1'b1;
 
+    // Single high-level switch for HDMI output resolution: 0 = stock 1080p30/60 (default, selected at runtime by the
+    // HDMI FRAMERATE jumper), 1 = fixed 1024x768@60Hz VESA output (for displays that don't support 1080p, e.g. 1024x768 panels)
+    // Flip this and rebuild (synthesis + implementation) to switch; no other source changes are needed
+    localparam logic OUTPUT_1024X768 = 1'b1;
+
     // The internal Verilog SCC is now working, so enable the transceivers that hook it to the serial bus instead of using the external SCC
     assign INTERNAL_SCC_EN = 1'b0;
 
@@ -500,11 +505,13 @@ module top(
     logic VA_overflow;
     logic _clr_vid_clk;
 
-    HDMI_Interface lisa_hdmi_output(
+    HDMI_Interface #(
+        .OUTPUT_1024X768(OUTPUT_1024X768)
+    ) lisa_hdmi_output(
         .sysclk(sysclk_ibuf),
         ._reset(_RESET),
         .DOTCK(DOTCK),
-        .framerate_sel(FRAMERATE_SEL), // 0 for 1080p30, 1 for 1080p60
+        .framerate_sel(FRAMERATE_SEL), // 0 for 1080p30, 1 for 1080p60 (or 1024x768@60Hz instead of 1080p60, if OUTPUT_1024X768 above is set)
         .VA_overflow(VA_overflow), // Replaces VSYNC; better reflects the VSYNC time which is actually longer than _VSYNC
         ._clr_vid_clk(_clr_vid_clk), // Replaces _HSYNC; better reflects the HSYNC time which is actually shorter than _HSYNC
         .VID(VID_int),
