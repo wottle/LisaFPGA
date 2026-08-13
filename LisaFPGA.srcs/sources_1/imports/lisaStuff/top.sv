@@ -141,7 +141,24 @@ module top(
 
         input logic [1:0] SPEED_SEL,
         input logic CPU_ROM_SEL,
-        input logic IO_ROM_SEL
+        input logic IO_ROM_SEL,
+
+        // Configuration SPI flash, reused after configuration to hold saved settings.
+        // These are the FPGA's own config pins (bank 14) driven as ordinary user I/O once
+        // configuration is done; CCLK is absent because it is not a user pin at all and is
+        // reached through the STARTUPE2 primitive inside settings_flash instead.
+        // D02/D03 (L14/M14) are deliberately left unconnected: this part has the QE bit set at
+        // the factory (the "Q" in W25Q128JVSIQ), so the flash's WP#/HOLD# functions are disabled
+        // and those pins matter only for quad transfers, which we never issue.
+        // D02/D03 are the flash's IO2/IO3, which double as WP# and HOLD# when the QE bit is clear.
+        // Originally left floating on the assumption that this part's factory-set QE bit disables those
+        // functions -- but a floating HOLD# reading low holds the flash inert, which matches the
+        // all-0xFF JEDEC ID we saw. Drive them high so WP#/HOLD# are deasserted either way.
+        output logic FLASH_D02,
+        output logic FLASH_D03,
+        output logic FLASH_CS_N,
+        output logic FLASH_MOSI,
+        input logic FLASH_MISO
     );
 
     // This is the board ID for the LisaFPGA identity register; software can read it to see if it's on a real Lisa or an FPGA
@@ -151,10 +168,35 @@ module top(
     // It's also exposed as a field in the identity register
     localparam logic LisaFPGA_Desktop = 1'b1;
 
-    // Single high-level switch for HDMI output resolution: 0 = stock 1080p30/60 (default, selected at runtime by the
-    // HDMI FRAMERATE jumper), 1 = fixed 1024x768@60Hz VESA output (for displays that don't support 1080p, e.g. 1024x768 panels)
-    // Flip this and rebuild (synthesis + implementation) to switch; no other source changes are needed
+    // Whether the 1024x768@60Hz VESA mode is included in the build. All three modes (1080p30, 1080p60 and
+    // 1024x768) are now selected at RUNTIME, not here -- the FRAMERATE jumper picks 1080p30 or 1080p60 exactly
+    // as on a stock board, and the on-screen menu's RESOLUTION item cycles through all available modes.
+    //   1'b1 = all three modes available (needs hdmi_clock_divider_1024x768; see tools/vivado_scripts/)
+    //   1'b0 = 1080p30 and 1080p60 only; the 1024x768 clock mux stage and its whole scaling path fold away as
+    //          dead code, giving a leaner build for boards that will never drive a 1024x768 panel
     localparam logic OUTPUT_1024X768 = 1'b1;
+
+    // Horizontal placement of the image within the 1080p frame. The Lisa image is narrower than 1920 (1440 wide for
+    // H ROMs, 1216 for 3A ROMs), so there's spare width to distribute; by default it's split evenly as left/right
+    // letterbox bars. Set this to HALIGN_LEFT or HALIGN_RIGHT to push the image against that edge instead, which is
+    // useful when the display sits behind a case cut-out that isn't itself centred on the panel.
+    // This only affects the 1080p modes -- the 1024x768 mode has its own (always centred) 32px borders.
+    localparam logic [1:0] HALIGN_CENTER = 2'd0;
+    localparam logic [1:0] HALIGN_LEFT   = 2'd1;
+    localparam logic [1:0] HALIGN_RIGHT  = 2'd2;
+    // Neutral starting point only: with settings persisted in flash you tune and save rather than
+    // baking a value in here, so centred is the sensible default for a board with nothing saved.
+    localparam logic [1:0] OUTPUT_1080P_HALIGN = HALIGN_CENTER;
+
+    // TEMPORARY DEBUG AID: set this to 1'b1 to tune the 1080p horizontal offset live, using the ESFloppy control
+    // buttons, instead of rebuilding for every value. LEFT/RIGHT move the image (the offset is applied on top of
+    // whatever OUTPUT_1080P_HALIGN starts it at), and OK toggles the step between 1px (fine) and 8px (coarse).
+    // The current offset is drawn on-screen as three digits in the top-left corner, followed by C or F for the
+    // step size -- read that number off, put it in OUTPUT_1080P_HALIGN (or hardcode it), then set this back to 0.
+    // Note the ESFloppy OLED can't be used for this: it's wired to the ESFloppy ESP32's I2C, not to the FPGA.
+    // Leave this at 1'b0 for normal builds -- it costs no logic when disabled, but it does steal the ESFloppy
+    // buttons and paint over the top-left corner of the picture while enabled.
+    localparam logic ALIGNMENT_TUNING_MODE = 1'b1;
 
     // The internal Verilog SCC is now working, so enable the transceivers that hook it to the serial bus instead of using the external SCC
     assign INTERNAL_SCC_EN = 1'b0;
@@ -505,9 +547,99 @@ module top(
     logic VA_overflow;
     logic _clr_vid_clk;
 
+    // ---------------------------------------------------------------------------------------------
+    // Saved settings in the configuration flash (see settings_flash.sv). READ-ONLY for now: the
+    // erase/program path exists in the module but nothing requests a save yet, so this build cannot
+    // touch the flash contents. That is deliberate -- it proves the whole read path (STARTUPE2, the
+    // pin constraints, the shift engine, the checksum) with zero risk to the boot image.
+    // A blank sector reads as 0xFF, fails the magic check, and falls back to compile-time defaults.
+    // ---------------------------------------------------------------------------------------------
+    logic [79:0] settings_data;
+    logic settings_valid, settings_load_done, settings_busy;
+    logic [23:0] settings_jedec_id;
+    logic [23:0] settings_dbg_word;
+    logic settings_loaded = 1'b0;   // latched level: "the load has finished, data is stable"
+    logic settings_load_req = 1'b1; // one-shot request, cleared once the load starts
+
+    always_ff @(posedge sysclk_ibuf) begin
+        if (settings_busy) settings_load_req <= 1'b0;
+        if (settings_load_done) settings_loaded <= 1'b1;
+    end
+
+    // Save handshake. settings_save_req is a level raised in the pixel domain; sync it here, take its
+    // rising edge as a one-shot do_save, and report completion back as a level the pixel side syncs.
+    // The 80-bit payload needs no synchroniser: HDMI_Interface latches it into a register at the moment
+    // SAVE is picked and holds it until the write finishes, so it is stable throughout.
+    logic [79:0] settings_save_data;
+    logic settings_save_req;
+    (* ASYNC_REG = "TRUE" *) logic save_req_int, save_req_sync;
+    logic save_req_sync_q = 1'b0;
+    logic do_save_pulse = 1'b0;
+    logic saving = 1'b0, saw_busy = 1'b0, settings_save_done = 1'b0;
+
+    always_ff @(posedge sysclk_ibuf) begin
+        save_req_int  <= settings_save_req;
+        save_req_sync <= save_req_int;
+        save_req_sync_q <= save_req_sync;
+
+        do_save_pulse <= save_req_sync && !save_req_sync_q;   // rising edge only
+
+        if (do_save_pulse) begin
+            saving   <= 1'b1;
+            saw_busy <= 1'b0;
+        end else if (saving) begin
+            // busy goes high a cycle or two after the pulse, so wait to actually see it before
+            // treating its removal as completion -- otherwise we would finish instantly
+            if (settings_busy) saw_busy <= 1'b1;
+            else if (saw_busy) begin
+                saving <= 1'b0;
+                settings_save_done <= 1'b1;
+            end
+        end
+        // Hold done until the requester drops its request, then rearm
+        if (!save_req_sync) settings_save_done <= 1'b0;
+    end
+
+    assign FLASH_D02 = 1'b1;   // WP#  deasserted
+    assign FLASH_D03 = 1'b1;   // HOLD# deasserted
+
+    settings_flash settings_store (
+        .clk(sysclk_ibuf),
+        .rst(1'b0),
+        .do_load(settings_load_req),
+        .do_save(do_save_pulse),
+        .busy(settings_busy),
+        .load_done(settings_load_done),
+        .load_valid(settings_valid),
+        .settings_in(settings_save_data),
+        .settings_out(settings_data),
+        .jedec_id(settings_jedec_id),
+        .dbg_word(settings_dbg_word),
+        .flash_cs_n(FLASH_CS_N),
+        .flash_mosi(FLASH_MOSI),
+        .flash_miso(FLASH_MISO)
+    );
+
     HDMI_Interface #(
-        .OUTPUT_1024X768(OUTPUT_1024X768)
+        .OUTPUT_1024X768(OUTPUT_1024X768),
+        .HALIGN_1080P(OUTPUT_1080P_HALIGN),
+        .ALIGNMENT_TUNING_MODE(ALIGNMENT_TUNING_MODE)
     ) lisa_hdmi_output(
+        // ESFloppy control buttons, borrowed for live alignment tuning when ALIGNMENT_TUNING_MODE is set.
+        // They're still passed through to the ESP32 as usual (see ESFLOPPY_COMM_BUS above), so nothing is broken
+        // for ESFloppy; these are just an extra read of the same pins. Active low (1k pull-ups to 3V3).
+        // Saved settings from the config flash; settings_loaded is a level that goes high once
+        // the read has completed, at which point settings_data is stable and never changes again
+        .settings_loaded(settings_loaded),
+        .settings_valid(settings_valid),
+        .settings_data(settings_data),
+        .settings_save_done(settings_save_done),
+        .settings_save_data(settings_save_data),
+        .settings_save_req(settings_save_req),
+        .jedec_id(settings_dbg_word),
+        .btn_left(LEFT_ESFLOPPY),
+        .btn_ok(OK_ESFLOPPY),
+        .btn_right(RIGHT_ESFLOPPY),
         .sysclk(sysclk_ibuf),
         ._reset(_RESET),
         .DOTCK(DOTCK),

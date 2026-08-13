@@ -244,6 +244,9 @@ If you'd rather output a fixed 1024x768@60Hz VESA signal (e.g. for an older 1024
 - **The HDMI FRAMERATE jumper still works in this build**, but it now picks between 1080p30 and 1024x768 instead of between 1080p30 and 1080p60: leave the jumper in its normal 30FPS position for 1080p30 (useful as a fallback if you need to temporarily plug into a 1080p-capable display), or move it to the other position (the one normally labeled 60FPS) to get the 1024x768@60Hz output.
 - 1024x768 mode is currently only fully scaled/centered for H ROM systems (720x364 native resolution, scaled to 960x728 with black borders); 3A ROM systems (608x432) will show a simple centered 1:1 image rather than a properly scaled one in this mode.
 
+#### Shifting the 1080p image left or right
+The Lisa image is narrower than 1920 (1440 wide for H ROMs, 1216 for 3A ROMs), so in 1080p mode there are letterbox bars either side. By default the image is centered, but the `OUTPUT_1080P_HALIGN` localparam in `top.sv` lets you push it flush against one edge instead — set it to `HALIGN_LEFT`, `HALIGN_RIGHT`, or `HALIGN_CENTER` (the default). This is handy if you're building a case whose screen cut-out isn't itself centered on the panel. It only affects the 1080p modes; the 1024x768 mode keeps its own centered borders.
+
 Once all of those things have happened, the board is ready for use! 
 
 ### Turning on the Lisa
