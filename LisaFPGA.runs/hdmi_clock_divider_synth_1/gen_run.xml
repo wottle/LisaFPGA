@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<GenRun Id="hdmi_clock_divider_synth_1" LaunchPart="xc7a100tcsg324-2" LaunchTime="1782494804">
-  <File Type="RDS-DCP" Name="hdmi_clock_divider.dcp"/>
-  <File Type="RDS-RDS" Name="hdmi_clock_divider.vds"/>
+<GenRun Id="hdmi_clock_divider_synth_1" LaunchPart="xc7a100tcsg324-2" LaunchTime="1785457284">
   <File Type="REPORTS-TCL" Name="hdmi_clock_divider_reports.tcl"/>
-  <File Type="PA-TCL" Name="hdmi_clock_divider.tcl"/>
   <File Type="RDS-UTIL" Name="hdmi_clock_divider_utilization_synth.rpt"/>
   <File Type="RDS-UTIL-PB" Name="hdmi_clock_divider_utilization_synth.pb"/>
+  <File Type="PA-TCL" Name="hdmi_clock_divider.tcl"/>
+  <File Type="RDS-RDS" Name="hdmi_clock_divider.vds"/>
+  <File Type="RDS-DCP" Name="hdmi_clock_divider.dcp"/>
   <FileSet Name="sources" Type="BlockSrcs" RelSrcDir="$PSRCDIR/hdmi_clock_divider" RelGenDir="$PGENDIR/hdmi_clock_divider">
     <File Path="$PSRCDIR/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider.xci">
       <FileInfo>
@@ -39,7 +39,7 @@
     </Config>
   </FileSet>
   <Strategy Version="1" Minor="2">
-    <StratHandle Name="Vivado Synthesis Defaults" Flow="Vivado Synthesis 2025"/>
+    <StratHandle Name="Vivado Synthesis Defaults" Flow="Vivado Synthesis 2026"/>
     <Step Id="synth_design"/>
   </Strategy>
 </GenRun>

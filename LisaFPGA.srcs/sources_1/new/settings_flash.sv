@@ -21,7 +21,11 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module settings_flash #(
-    parameter logic [23:0] SETTINGS_ADDR = 24'hC00000
+    parameter logic [23:0] SETTINGS_ADDR = 24'hC00000,
+    // Compiles in an ILA that captures the SPI bus and the sequencer state. Off by default: it costs
+    // ~6 BRAMs and only exists to debug the save path. Requires tools/vivado_scripts/add_settings_ila.tcl
+    // to have been run once, to create the `settings_ila` IP.
+    parameter logic        DEBUG_ILA     = 1'b0
 ) (
     input  logic        clk,          // 125MHz sysclk -- must be stable, not the muxed pixel clock
     input  logic        rst,          // active high
@@ -64,21 +68,40 @@ module settings_flash #(
     localparam logic [7:0] CMD_RDSR1 = 8'h05; // read status register 1 (bit 0 = BUSY)
     localparam logic [7:0] CMD_RDID  = 8'h9F; // read JEDEC ID (manufacturer + type + capacity)
 
-    // --- SCK generation: sysclk/8, plus the SPI mode-0 shift points derived from it ----------
-    logic [2:0] clkdiv;
-    logic sck_r, sck_rise, sck_fall;
-    always_ff @(posedge clk) begin
-        if (rst) clkdiv <= 3'd0;
-        else     clkdiv <= clkdiv + 3'd1;
-    end
-    assign sck_rise = (clkdiv == 3'd4); // sample MISO here
-    assign sck_fall = (clkdiv == 3'd0); // change MOSI here
-
-    // --- byte-level shift engine -------------------------------------------------------------
+    // --- byte-level shift engine (declared up here: the SCK divider below re-aligns on xfer_start) --
     logic       xfer_start;
     logic [7:0] tx_byte, rx_byte, shift_tx, shift_rx;
     logic [3:0] bit_cnt;
     logic       xfer_active, xfer_done;
+
+    // --- SCK generation: sysclk/8, plus the SPI mode-0 shift points derived from it ----------
+    logic [2:0] clkdiv;
+    logic sck_r, sck_rise, sck_fall;
+    // clkdiv MUST be re-aligned at the start of every byte, not left free-running.
+    //
+    // sck_rise is clkdiv==4 and sck_fall is clkdiv==0. If a transfer begins at a phase where
+    // sck_fall lands before sck_rise, the falling-edge branch below advances MOSI once BEFORE the
+    // flash has clocked anything, so the MSB is shifted out and lost and a 0 is appended -- the
+    // byte reaches the flash multiplied by two.
+    //
+    // Within a burst this never happened: each byte takes exactly 64 clocks = 8 whole divider
+    // cycles, so the phase was inherited intact. But S_DESEL dwells 33 clocks, and 33 mod 8 = 1,
+    // which rotated the phase by exactly one -- so the FIRST byte of every command issued after a
+    // deselect was corrupted, and only that byte. Confirmed on an ILA capture (2026-08-13) by
+    // decoding MOSI at the SCK rising edges and comparing against tx_byte: 03 (READ) went out as
+    // 06, 20 (sector erase) as 40, 05 (RDSR1) as 0A. Commands issued straight from S_IDLE were
+    // fine, which is why the JEDEC ID read worked perfectly and hid this for nine build cycles.
+    //
+    // Load 1, not 0: loading 0 means the next cycle IS sck_fall and reproduces the bug. Starting
+    // at 1 makes the sequence 1,2,3,4(rise),5,6,7,0(fall), so the first edge the flash sees is a
+    // rising one and MOSI has had 4 clocks (32ns) of setup.
+    always_ff @(posedge clk) begin
+        if (rst)                             clkdiv <= 3'd0;
+        else if (xfer_start && !xfer_active) clkdiv <= 3'd1;
+        else                                 clkdiv <= clkdiv + 3'd1;
+    end
+    assign sck_rise = (clkdiv == 3'd4); // sample MISO here
+    assign sck_fall = (clkdiv == 3'd0); // change MOSI here
 
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -206,8 +229,18 @@ module settings_flash #(
                 S_ID_D1:  if (xfer_done) begin jedec_id[15:8]  <= rx_byte; tx_byte <= 8'h00; xfer_start <= 1'b1; state <= S_ID_D2; end
                 S_ID_D2:  if (xfer_done) begin
                     jedec_id[7:0] <= rx_byte;
-                    flash_cs_n <= 1'b1;          // ID read ends here; the block read starts a new CS cycle
-                    state <= S_LD_CMD;
+                    // Deselect PROPERLY before the block read. Jumping straight to S_LD_CMD raised CS
+                    // for exactly ONE 8ns clock, because S_LD_CMD reasserts it on the very next cycle --
+                    // far short of the W25Q128JV's 50ns tSHSL minimum. Confirmed on an ILA capture
+                    // (2026-08-13): the flash answered 0x9F correctly with EF 40 18, then this glitch
+                    // made it drive MISO LOW continuously -- through the command and address phases where
+                    // it should be high-Z, through all 16 data bytes, and on into idle with CS high. So
+                    // the block always read back 0x00, which is not even a legal blank value (an erased
+                    // sector reads 0xFF), and the chip was left ignoring subsequent commands.
+                    // Every other command boundary in this module already routes through S_DESEL.
+                    desel_next <= S_LD_CMD;
+                    cs_dly     <= 6'd32;   // 32 clocks @125MHz = 256ns, comfortably over tSHSL
+                    state      <= S_DESEL;
                 end
                 // The block read proper. CS is re-asserted here because the ID read above released it.
                 S_LD_CMD: begin flash_cs_n <= 1'b0; tx_byte <= CMD_READ; xfer_start <= 1'b1; state <= S_LD_A2b; end
@@ -286,4 +319,41 @@ module settings_flash #(
             endcase
         end
     end
+
+
+    // ---------------------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------------------
+    // Debug capture. Probe layout must match tools/vivado_scripts/add_settings_ila.tcl.
+    // Sampled on the same 125MHz clock that drives the sequencer, so every SPI edge is visible
+    // (SCK is clk/8, giving 8 samples per half period).
+    //
+    // Only FIVE probes: Vivado's BASIC ChipScope license hard-errors on an ILA with more than
+    // five ("[Chipscope 16-620] ... more than 5 probes enabled"), and it does that at synthesis
+    // time, so it costs a whole run to discover. Probe WIDTH is not restricted, so the 46 bits
+    // are packed into five buses instead. The split is deliberate: dbg_state is its own probe
+    // (we trigger on it) and xfer_done is bit 0 of dbg_flags (we qualify capture on it), so
+    // neither needs an awkward masked compare.
+    // ---------------------------------------------------------------------------------------
+    generate
+    if (DEBUG_ILA) begin : g_ila
+        logic [4:0]  dbg_state;
+        logic [3:0]  dbg_bus;
+        logic [5:0]  dbg_flags;
+        logic [22:0] dbg_misc;
+
+        assign dbg_state = state;   // enum -> plain vector, so the probe width is unambiguous
+        assign dbg_bus   = {flash_cs_n, sck_r, flash_mosi, flash_miso};
+        assign dbg_flags = {do_save, busy, eos, xfer_start, xfer_active, xfer_done};
+        assign dbg_misc  = {tx_byte, byte_idx, cs_dly, bit_cnt};
+
+        settings_ila ila_settings (
+            .clk    (clk),
+            .probe0 (dbg_state),
+            .probe1 (rx_byte),
+            .probe2 (dbg_bus),
+            .probe3 (dbg_flags),
+            .probe4 (dbg_misc)
+        );
+    end
+    endgenerate
 endmodule

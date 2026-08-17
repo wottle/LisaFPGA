@@ -198,6 +198,12 @@ module top(
     // buttons and paint over the top-left corner of the picture while enabled.
     localparam logic ALIGNMENT_TUNING_MODE = 1'b1;
 
+    // Compiles an ILA into settings_flash to capture the SPI bus and the save sequencer over JTAG.
+    // Purely a debug aid for the parked flash-persistence work (see CLAUDE.md) -- leave at 1'b0 for
+    // normal builds. Setting it to 1'b1 requires tools/vivado_scripts/add_settings_ila.tcl to have
+    // been run once in this project, otherwise synthesis fails with "module 'settings_ila' not found".
+    localparam logic DEBUG_FLASH_ILA = 1'b0;
+
     // The internal Verilog SCC is now working, so enable the transceivers that hook it to the serial bus instead of using the external SCC
     assign INTERNAL_SCC_EN = 1'b0;
 
@@ -603,7 +609,9 @@ module top(
     assign FLASH_D02 = 1'b1;   // WP#  deasserted
     assign FLASH_D03 = 1'b1;   // HOLD# deasserted
 
-    settings_flash settings_store (
+    settings_flash #(
+        .DEBUG_ILA(DEBUG_FLASH_ILA)
+    ) settings_store (
         .clk(sysclk_ibuf),
         .rst(1'b0),
         .do_load(settings_load_req),

@@ -243,7 +243,8 @@ summon the menu, which is why it can reasonably be left enabled:
 | Menu open | move the highlight | activate the item | close menu |
 | Adjust on, menu closed | move the image | cycle axis then step size | open menu |
 
-Menu items: `RESOLUTION` (1080P30 / 1024X768), `ADJUST IMAGE`, `SCANLINES`, `MAX CONTRAST`, `EXIT`. The selected
+Menu items: `RESOLUTION` (1080P30 / 1080P60 / 1024X768), `ADJUST IMAGE`, `SCANLINES`, `MAX CONTRAST`,
+`SAVE SETTINGS`, `EXIT`. The selected
 row is drawn inverted, and the box auto-centres for whichever mode is live.
 - Each setting is a **toggle XORed onto the real input** (`mode_sel_eff`, `scanlines_eff`, `contrast_eff`), so the
   physical jumpers still work and the menu just flips whatever they currently say.
@@ -333,13 +334,26 @@ mode project below. Note also that LisaFPGA never reads EDID (`HDMI_SCL`/`HDMI_S
 XDC) and ignores hot-plug detect, so it cannot adapt to what a display advertises — it just emits the mode.
 
 
-### PARKED (2026-08-13): persisting settings in the config flash — reads work, writes do not
+### Settings persistence in the config flash — WORKING ON HARDWARE (2026-08-14)
 
 `settings_flash.sv` reuses the FPGA's own configuration flash (Winbond W25Q128JV) to store a 16-byte
 settings block at **0xC00000** (12MB in, ~8MB clear of the 3.65MB bitstream at address 0), so alignment
-offsets could survive a power cycle. **It is wired in and builds cleanly, but saving does not work yet.**
-Loading is harmless: a blank sector fails the magic/checksum check and falls back to compile-time defaults,
-which is exactly what a board with nothing saved should do. So the current build is safe to use as-is.
+offsets survive a power cycle. **Confirmed end to end on hardware on 2026-08-14**: the menu's SETTINGS item
+showed SAVED, and after reconfiguring the FPGA the board came straight up with the saved alignment instead of
+the compile-time defaults. Erase, page-program, checksum, load and fallback all work.
+
+The root cause of the long-running failure is written up under "ROOT CAUSE" below — a free-running SCK
+divider that dropped the MSB of the first byte of every command issued after a deselect. Read that section
+before touching the shift engine.
+
+A blank sector still falls back to compile-time defaults, which is what a board with nothing saved should do.
+
+**Menu behaviour on the `SAVE SETTINGS` row.** `settings_valid_q` is sticky — it means "a valid block exists
+in flash" — so once the first save lands the row would read SAVED forever and a second save would produce no
+visible change even though it really did write. A `save_disp_cnt` frame counter therefore forces the row to
+show `SAVING` for 30 frames (~0.5s at 60Hz, ~1s at 30Hz) on every press, then fall back to `SAVED`. The write
+itself is much shorter than that, so without the hold the transition would flicker past in two or three
+frames. `SAVING` also overrides the JEDEC/`dbg_word` hex readout that the row shows while nothing is saved.
 
 **How it is accessed.** After configuration, CS/MOSI/MISO appear on ordinary bank-14 I/O — `FCS_B=L13`,
 `D00_MOSI=K17`, `D01_DIN=K18` on this part (confirmed via `get_package_pins -filter {PIN_FUNC =~ "*FCS_B*"}`,
@@ -358,17 +372,232 @@ SPI throughout, clocked from the stable 125MHz sysclk (NOT the pixel clock, whos
   a register — illegal, and Vivado resolved it silently with no error or warning rather than failing. The save
   request never behaved as written. All of that logic now lives in one block.
 
-**Where it is stuck.** With a live state readout on the menu (`dbg_word` = state / last rx byte / flags), the
+**Where it was stuck** (historical — resolved 2026-08-14, see ROOT CAUSE below). With a live state readout on the menu (`dbg_word` = state / last rx byte / flags), the
 sequencer *is* running the save: it reaches the page-program phase and cycles `S_PP_DATA` -> `S_DESEL` ->
 `S_POLL_RD` -> `S_POLL_END`. But the status register reads **0xFF**, whose bit 0 (BUSY) is set, so the poll
 never exits. 0xFF is not a valid status value (a real part returns 0x00 idle / 0x03 busy) — it is the
 signature of the flash not driving MISO at all. So mid-sequence the chip stops responding, even though a
 JEDEC read from a fresh idle state works.
 
-**If this is resumed, do NOT keep guessing from the outside.** Nine build cycles at ~2h each went into
-inference. Use Vivado's **ILA** to capture `flash_cs_n`, CCLK, MOSI, MISO and `state` into on-chip memory and
-look at the actual waveform over JTAG — that settles in one build what inference did not. Prime suspects:
-CS/clock timing around the command boundaries, and whether the write-enable latch is actually being set.
+
+**Goal, precisely.** Let a user tune image alignment (and scanlines/contrast/resolution) from the on-screen
+menu and have it survive a power cycle, so nothing has to be baked into the bitstream. The fallback if this
+is abandoned is unchanged and perfectly usable: read the offset off the tuning readout and put it in
+`OUTPUT_1080P_HALIGN` (or an explicit pixel constant), which is how the tuning tool was designed to be used.
+
+**Block format** (16 bytes at 0xC00000), so a known-good block can be written externally to test the read
+path in isolation:
+
+| Offset | Contents |
+|---|---|
+| 0..3   | magic `'L' 'F' 'P' 'G'` |
+| 4..5   | h_offset_1080p (little-endian, 11 bits used) |
+| 6..7   | v_offset_1080p |
+| 8..9   | h_offset_1024 |
+| 10..11 | v_offset_1024 |
+| 12     | flags: bit0 scanlines, bit1 contrast, bits3:2 video_mode, bit4 "video_mode valid" |
+| 13     | reserved |
+| 14..15 | checksum: plain 16-bit sum of bytes 0..13 |
+
+1080p30 and 1080p60 deliberately SHARE one offset pair — same 1920x1080 frame geometry, so the image sits in
+the same place; only the refresh differs.
+
+**How a save is requested** (three clock domains, worth knowing before changing anything): the menu (pixel
+domain) snapshots the current values into `settings_save_data` and raises `settings_save_req` as a LEVEL.
+top.sv synchronises that into sysclk, takes its rising edge as a one-shot `do_save`, waits to actually see
+`busy` go high and then fall, and reports `settings_save_done` back as a level which the pixel domain
+synchronises and uses to drop the request and set the SAVED indicator.
+
+**Reading the on-screen diagnostic.** With the tuning menu open, the SAVE SETTINGS row shows `dbg_word` as six hex
+digits, `SSRRFF`: `SS` = sequencer state, `RR` = last byte received, `FF` = flags (bit1 `do_save`, bit0
+`busy`). State numbering follows the enum order in `settings_flash.sv`:
+
+| Hex | State | Hex | State |
+|---|---|---|---|
+| 00 | S_IDLE | 11 | S_ER_END |
+| 01-04 | S_ID_CMD, D0, D1, D2 (JEDEC) | 12 | S_PP_WREN |
+| 05-09 | S_LD_CMD, A2b, A2, A1, A0 | 13 | S_PP_CMD |
+| 0A-0B | S_LD_DATA, S_LD_CHECK | 14-17 | S_PP_A2, A1, A0, AL |
+| 0C | S_ER_WREN | 18 | S_PP_DATA |
+| 0D | S_ER_CMD | 19 | S_DESEL |
+| 0E-10 | S_ER_A2, A1, A0 | 1A-1C | S_POLL_CMD, RD, END |
+
+The values actually observed on hardware were **18FF01, 19FF01, 1BFF01, 1CFF01** = S_PP_DATA, S_DESEL,
+S_POLL_RD, S_POLL_END, all with rx=FF and busy=1: the page-program phase runs, then the busy-poll spins
+forever on a status byte of 0xFF. Re-derive this table from the enum in `settings_flash.sv` after any edit —
+inserting a state renumbers everything below it.
+
+**Hypotheses tested and ruled out**, so they are not re-tried:
+- *Wrong pins* — no. `FCS_B=L13`, `D00_MOSI=K17`, `D01_DIN=K18` came from `get_package_pins` on the actual
+  device, not from the schematic or memory.
+- *SPI link dead* — no. JEDEC ID reads **EF4018**, exactly right for a W25Q128JV. Reads work.
+- *Never leaving idle / request lost* — no. The diagnostic shows the sequencer reaching `S_PP_DATA` and the
+  poll states, so the menu action, the CDC handshake and the erase phase all work.
+- *Erase not committing (CS never rising)* — was true, now fixed, and the sequencer gets past it.
+- *Multiple drivers on the request register* — was true, now fixed.
+- *Blank sector vs dead link ambiguity* — resolved by the JEDEC readout. Note this trap: a blank sector reads
+  0xFF and so does a floating MISO, so "DEFAULT" alone proves nothing about whether the link works.
+
+**The symptom that was chased** (historical), stated exactly: after the page-program phase, Status Register 1 reads `0xFF`
+forever. Bit 0 is the BUSY bit, so the poll never exits. `0xFF` is not a value a working part returns (idle
+is 0x00, busy is 0x03) — it means the chip is not driving MISO at that point in the sequence, even though it
+answers a JEDEC read issued from a fresh idle state.
+
+**Suspects listed at the time** (all wrong, kept to show what plausible-but-unfounded looks like):
+1. Whether the Write Enable Latch is actually set — read Status Register 1 straight after the WREN and look
+   for WEL (bit 1). If WEL never sets, the erase and program are both being ignored.
+2. CS and clock behaviour around command boundaries — particularly whether `S_DESEL`'s 32-cycle dwell really
+   appears on the pin, and whether CCLK through `STARTUPE2` looks clean at the start of each command.
+3. Whether the flash is still responding at all mid-sequence, or has been left in a state (e.g. mid-erase
+   suspend, or an unrecognised command) where it ignores everything.
+
+**A deduction that was WRONG — recorded because the reasoning looked airtight.** It ran: the only route to
+`S_PP_WREN` is the post-erase poll exiting, and that poll only exits on a status byte with bit 0 clear, so
+the flash must have returned a real status during the erase poll. The ILA disproved it. On the captured run
+the erase poll **never exits** — it loops forever with `rx=0xFF`, which is simply a floating pulled-up MISO.
+The logic was valid; the hidden premise, that the earlier on-screen `18FF01` reading and this run behave the
+same, was not. **Do not reason forward from a single stale observation across builds.**
+
+### ILA capture results (2026-08-13) — measurement was invalid; MISO had no pull-up
+
+The ILA was worth it, but the first two conclusions drawn from it were **both wrong**, for the same
+underlying reason. Recorded in full because the failure mode is instructive.
+
+**What the captures established solidly** (these still stand):
+- The SPI master is correct on the wire. `ila_arm_wren` (trigger `do_save`, full rate) shows
+  `06` (WREN) → CS high 32 clocks → `20 C0 00 00` (4KB sector erase at 0xC00000) → CS high → `05` (RDSR1).
+  `ila_arm_jedec` shows exactly **8 SCK rising edges per byte, uniformly spaced 8 clocks apart**, 128 edges
+  across the 16 data bytes, no glitches, CS dwell correct. The sequencer, shift engine and CCLK-via-STARTUPE2
+  path all work.
+- **The JEDEC ID read works, every single time.** `9F` → `EF 40 18`, repeated on every ~34ms `auto_load`
+  cycle, including in the samples immediately preceding a save. The link is alive and not wedged.
+- The erase poll **never exits**: 2049 consecutive `RDSR1` reads, all returning `FF`.
+
+**The invalid measurement.** `FLASH_MISO` (K18) had **no `PULLTYPE` constraint**, and the board has no
+external pull-up. The flash's DO pin is high-Z whenever it is not actively driving — between commands, and
+during the command and address phases of a read. So the FPGA input floated and simply held its last driven
+value. **Every 0 or 1 captured on that pin while the flash was not driving means nothing.**
+
+That single defect produced two confident, wrong conclusions:
+- *"The block read returns 0x00, and a blank sector cannot read 0x00, so this is evidence of a fault."*
+  Wrong. The block read follows the JEDEC ID's last byte `0x18`, which ends on a `0` bit; the line simply
+  stayed low. `0x00` was residue, not data.
+- *"`S_ID_D2` deasserted CS for only one 8ns clock, violating the part's 50ns tSHSL, wedging the chip."*
+  The timing violation was **real and worth fixing** (the fix is in: `S_ID_D2` now routes through `S_DESEL`
+  with `cs_dly = 32`, giving 264ns, confirmed on a later capture). But it was **not the cause** — with the
+  correct dwell in place the symptom was completely unchanged.
+
+Symmetrically, `rx=FF` on the status poll is *also* uninformative: it is equally "the flash returned 0xFF"
+and "the flash drove nothing and the line had drifted high after a long idle".
+
+**The fix to the measurement**, now in `LisaFPGA.xdc`: `set_property PULLTYPE PULLUP [get_ports FLASH_MISO]`.
+With that, undriven reads as `0xFF` and anything else is genuine data from the flash. This is an XDC-only
+change, so it needs implementation but **not** re-synthesis.
+
+**What to conclude once the pull-up build is captured** (`ila_arm_jedec`, no buttons needed):
+- 16 data bytes read `FF` → the flash is not answering `03` at all, even though it answers `9F`. The read
+  path is broken, and the save is a downstream symptom.
+- 16 data bytes read `00` → the flash *is* driving, the sector genuinely contains zeros, reads work fine,
+  and the remaining problem is confined to the erase/program path.
+
+**The transferable lesson, and it is the real one from this whole episode:** before reasoning about what a
+signal *means*, establish that the signal is *observable*. A floating input is not a measurement. Two
+separate "root causes" were derived from a pin that carried no information, and each looked airtight.
+
+
+### ROOT CAUSE (2026-08-13): the SCK divider free-ran, so the first byte after every deselect lost its MSB
+
+Found by decoding **MOSI at the SCK rising edges** in the pull-up ILA capture and comparing it against
+`tx_byte` — i.e. by reading what the flash actually received rather than what the sequencer intended to send.
+
+| Capture | Byte | Issued from | Intended | On the wire |
+|---|---|---|---|---|
+| load | 1 | `S_IDLE` | `9F` | `9F` ok |
+| load | 5 | **first after `S_DESEL`** | `03` READ | **`06`** |
+| load | 6-9 | same burst | `C0 00 00 00` | ok |
+| save | 1 | `S_IDLE` | `06` WREN | `06` ok |
+| save | 2 | **first after `S_DESEL`** | `20` erase | **`40`** |
+| save | 6, 8 | **first after `S_DESEL`** | `05` RDSR1 | **`0A`** |
+
+Every corrupted byte is exactly its intended value **shifted left by one** — MSB dropped, zero appended —
+and *only* the first byte of a command issued after a deselect is affected.
+
+**Mechanism.** `clkdiv` was free-running and never aligned to the start of a transfer. `sck_rise` is
+`clkdiv==4`, `sck_fall` is `clkdiv==0`. When a byte begins at a phase where `sck_fall` arrives before
+`sck_rise`, the falling-edge branch advances MOSI once before the flash has clocked anything, so the MSB is
+gone before the first rising edge. Within a burst this never happened, because each byte is exactly 64
+clocks = 8 whole divider cycles and the phase is inherited. `S_DESEL` dwells **33** clocks, and 33 mod 8 = 1,
+rotating the phase by exactly one.
+
+**Why it hid for nine build cycles.** The JEDEC ID read is issued straight from `S_IDLE`, never after a
+deselect, so it always worked and always returned `EF 40 18` — which read as proof the SPI link was healthy.
+Everything downstream of it was corrupted:
+- `03` (READ) arrived as `06` (WREN) — a legal command with no data phase, so the flash correctly answered
+  nothing, stayed perfectly responsive, and the settings block read back as whatever the floating MISO held.
+  This is why loads always fell back to DEFAULT.
+- `20` (sector erase) arrived as `40` and `05` (RDSR1) as `0A`, both undefined opcodes. So no erase ever
+  happened, the status register was never actually read, and the busy-poll spun forever on an undriven line.
+
+**Fix** (`settings_flash.sv`): re-align the divider at the start of every byte —
+`else if (xfer_start && !xfer_active) clkdiv <= 3'd1;`. Load **1**, not 0: loading 0 makes the very next
+cycle `sck_fall` and reproduces the bug. Starting at 1 gives 1,2,3,4(rise),5,6,7,0(fall), so the first edge
+the flash sees is a rising one, with 4 clocks (32ns) of MOSI setup.
+
+**Two lessons worth keeping.** First, the earlier `S_ID_D2` tSHSL fix (CS high for only one 8ns clock) was a
+real violation and is still in, but it was never the cause — and *because* `S_DESEL` is 33 clocks, adding it
+is what rotated the phase. Second, and more useful: every diagnosis that failed here was made by reasoning
+about a signal's *value* (`rx_byte`, MISO) instead of checking what was physically transmitted. Decoding MOSI
+against `tx_byte` took one awk pass and settled it immediately.
+
+### ILA setup for the flash debug — built, and used successfully (2026-08-13)
+
+Everything needed to capture this over JTAG is in the tree, and it worked — see "ILA capture results" above
+for what it found. Keep it: the same three captures will verify the fix.
+
+- `tools/vivado_scripts/add_settings_ila.tcl` — run once in the Tcl Console. Creates a `settings_ila` IP:
+  5 probes, 4096 deep, with `C_EN_STRG_QUAL` on so capture control is available at runtime.
+- `settings_flash.sv` gained a `DEBUG_ILA` parameter (default 0) and a generate-guarded instantiation at the
+  bottom of the module. 46 bits packed into 5 probes:
+
+  | Probe | Width | Contents |
+  |---|---|---|
+  | 0 `dbg_state` | 5 | sequencer state (decode table above) |
+  | 1 `rx_byte` | 8 | last byte clocked in from the flash |
+  | 2 `dbg_bus` | 4 | bit3 flash_cs_n, bit2 sck_r, bit1 flash_mosi, bit0 flash_miso |
+  | 3 `dbg_flags` | 6 | bit5 do_save, bit4 busy, bit3 eos, bit2 xfer_start, bit1 xfer_active, bit0 xfer_done |
+  | 4 `dbg_misc` | 23 | [22:15] tx_byte, [14:10] byte_idx, [9:4] cs_dly, [3:0] bit_cnt |
+
+  **Five probes, not sixteen, because of a licence limit.** Vivado's BASIC ChipScope licence hard-ERRORS on
+  an ILA with more than 5 probes (`[Chipscope 16-620] ... more than 5 probes enabled`) — and it does so at
+  the very END of synthesis, after ~4 minutes, so discovering it costs a full run. Probe *width* is not
+  restricted, hence the packing. The split is deliberate: `dbg_state` is its own probe (we trigger on it)
+  and `xfer_done` is bit 0 of `dbg_flags` (we qualify capture on it), so neither needs a masked compare
+  built by hand.
+- `top.sv` gained `DEBUG_FLASH_ILA` (default `1'b0`) next to the other build constants, passed down.
+- `tools/vivado_scripts/capture_settings_ila.tcl` — source it in the Hardware Manager for
+  `ila_probes` / `ila_arm_program` / `ila_arm_wren` / `ila_arm_poll` / `ila_go`.
+
+**The core is instantiated in RTL, not inserted into the netlist via `mark_debug`.** Netlist insertion relies
+on constraints binding to net names that survive optimisation, which is exactly the failure mode this project
+has hit over and over (see the XDC gotchas). An instantiated core either connects or synthesis errors.
+
+**Why three capture setups rather than one.** A full save spans a ~45ms sector erase = 5.6M clocks at 125MHz,
+so no capture depth covers the whole thing. Instead trigger on a phase, and use storage qualification to
+store one sample per SPI byte where density matters more than edge detail:
+- `ila_arm_program` — trigger on entering `S_PP_WREN`, store on `xfer_done`. The main one: shows the WREN,
+  the PP command, address, 16 data bytes, and every status byte the poll then reads.
+- `ila_arm_wren` — trigger on `do_save`, store every clock. 32.7us of full-rate detail on CS assertion and
+  the first clock edges; this is the one that answers whether the electrical timing is sane.
+- `ila_arm_poll` — trigger on `S_POLL_END`, store on `xfer_done`, trigger position mid-buffer so it captures
+  polls both before and after. Shows whether the status byte is *ever* anything but 0xFF.
+
+Switching between the three is a runtime property change — **one bitstream covers all of them**, no rebuild.
+
+**Read the ILA first, then decide.** The point of this is to stop inferring. Resist changing RTL on the
+strength of the waveform's first surprise; capture all three, then act.
+**Historical note on how this was eventually cracked.** Nine build cycles at ~2h each went into inference
+and got nowhere. The ILA settled it in one evening — but only once the measurement itself was made valid
+(MISO pull-up) and the question was changed from "what did we receive" to "what did we actually transmit".
 
 **Timing note:** every signal crossing out of this module into the pixel domain must be constrained, or WNS
 collapses. Naming individual registers meant each newly added signal (`settings_data`, then `jedec_id`, then

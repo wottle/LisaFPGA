@@ -345,6 +345,17 @@ set_property -dict {PACKAGE_PIN M14 IOSTANDARD LVCMOS33} [get_ports FLASH_D03]
 set_property -dict {PACKAGE_PIN L13 IOSTANDARD LVCMOS33} [get_ports FLASH_CS_N]
 set_property -dict {PACKAGE_PIN K17 IOSTANDARD LVCMOS33} [get_ports FLASH_MOSI]
 set_property -dict {PACKAGE_PIN K18 IOSTANDARD LVCMOS33} [get_ports FLASH_MISO]
+# MISO must have a pull-up. The flash's DO pin is high-Z whenever it is not actively driving --
+# between commands, and during the command/address phases of a read -- and this board has no
+# external pull-up on the net. Without PULLUP the FPGA input floats and simply retains its last
+# value, so a captured 0 or 1 on this pin means NOTHING about what the flash did.
+# That confounded a whole ILA debugging session (2026-08-13): the settings block read back 0x00
+# and the status poll read back 0xFF, and BOTH were just the decaying residue of the previous
+# driven bit -- the block read follows the JEDEC ID byte 0x18, which ends on a 0, and the poll
+# follows a long idle during which the line drifted high. Two different "findings" were built on
+# those readings and both were wrong.
+# With the pull-up, undriven reads as 0xFF and anything else is real data from the flash.
+set_property PULLTYPE PULLUP [get_ports FLASH_MISO]
 
 ## Required once bank-14 config pins are used as user I/O, and good practice regardless: tells Vivado
 ## the config bank runs at 3.3V from VCCO. Without these, DRC CFGBVS-1 fires.

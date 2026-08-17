@@ -1,43 +1,46 @@
+INFO: [Common 17-3922] A valid Vivado Design Suite BASIC license has been detected. Your current license is active and will expire on 30-jul-2027.
 #-----------------------------------------------------------
-# Vivado v2025.2 (64-bit)
-# SW Build 6299465 on Fri Nov 14 12:34:56 MST 2025
-# IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
-# SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
-# Start of session at: Fri Jun 26 13:26:46 2026
-# Process ID         : 5441
-# Current directory  : /home/alexthecat123/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1
-# Command line       : vivado -log dotck_mmcm.vds -product Vivado -mode batch -messageDb vivado.pb -notrace -source dotck_mmcm.tcl
-# Log file           : /home/alexthecat123/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1/dotck_mmcm.vds
-# Journal file       : /home/alexthecat123/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1/vivado.jou
-# Running On         : alex-cattop
-# Platform           : Linuxmint
-# Operating System   : Linux Mint 22.1
-# Processor Detail   : AMD Ryzen 7 7745HX with Radeon Graphics
-# CPU Frequency      : 4775.672 MHz
-# CPU Physical cores : 8
-# CPU Logical cores  : 16
-# Host memory        : 32787 MB
-# Swap memory        : 8589 MB
-# Total Virtual      : 41377 MB
-# Available Virtual  : 37229 MB
+# Vivado v2026.1 (64-bit)
+# SW Build 6511674 on Tue Jun 16 11:02:23 MDT 2026
+# IP Build 6504888 on Tue Jun 09 09:05:25 MDT 2026
+# SharedData Build 6501428 on Mon Jun 08 17:34:18 MDT 2026
+# Start of session at: Thu Jul 30 17:07:00 2026
+# Process ID         : 7340
+# Current directory  : C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1
+# Command line       : vivado.exe -log dotck_mmcm.vds -product Vivado -mode batch -messageDb vivado.pb -notrace -source dotck_mmcm.tcl
+# Log file           : C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1/dotck_mmcm.vds
+# Journal file       : C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1\vivado.jou
+# Running On         : DESKTOP-78VBNFB
+# Platform           : Windows 10
+# Operating System   : 19045
+# Processor Detail   : Intel(R) Xeon(R) CPU E5-1650 v2 @ 3.50GHz
+# CPU Frequency      : 3500 MHz
+# CPU Physical cores : 6
+# CPU Logical cores  : 12
+# Host memory        : 17149 MB
+# Swap memory        : 3087 MB
+# Total Virtual      : 20236 MB
+# Available Virtual  : 9659 MB
 #-----------------------------------------------------------
 source dotck_mmcm.tcl -notrace
+create_project: Time (s): cpu = 00:00:13 ; elapsed = 00:00:10 . Memory (MB): peak = 582.988 ; gain = 268.141
 Command: synth_design -top dotck_mmcm -part xc7a100tcsg324-2 -incremental_mode off -mode out_of_context
 Starting synth_design
-Attempting to get a license for feature 'Synthesis' and/or device 'xc7a100t'
-INFO: [Common 17-349] Got license for feature 'Synthesis' and/or device 'xc7a100t'
+Attempting to get a license for feature 'Vivado_Synthesis' and/or device 'xc7a100t'
+INFO: [Common 17-349] Got license for feature 'Vivado_Synthesis' and/or device 'xc7a100t'
 INFO: [Device 21-403] Loading part xc7a100tcsg324-2
-INFO: [Synth 8-7079] Multithreading enabled for synth_design using a maximum of 7 processes.
+INFO: [Designutils 20-5008] Incremental synthesis strategy off
+INFO: [Synth 8-7079] Multithreading enabled for synth_design using a maximum of 2 processes.
 INFO: [Synth 8-7078] Launching helper process for spawning children vivado processes
-INFO: [Synth 8-7075] Helper process launched with PID 5645
+INFO: [Synth 8-7075] Helper process launched with PID 13212
 ---------------------------------------------------------------------------------
-Starting RTL Elaboration : Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 2220.977 ; gain = 481.875 ; free physical = 20737 ; free virtual = 31405
+Starting RTL Elaboration : Time (s): cpu = 00:00:09 ; elapsed = 00:00:09 . Memory (MB): peak = 1369.145 ; gain = 577.254
 ---------------------------------------------------------------------------------
-INFO: [Synth 8-6157] synthesizing module 'dotck_mmcm' [/home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm.v:68]
-INFO: [Synth 8-6157] synthesizing module 'dotck_mmcm_clk_wiz' [/home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm_clk_wiz.v:68]
-INFO: [Synth 8-6157] synthesizing module 'IBUF' [/tools/Xilinx/2025.2/Vivado/scripts/rt/data/unisim_comp.v:82804]
-INFO: [Synth 8-6155] done synthesizing module 'IBUF' (0#1) [/tools/Xilinx/2025.2/Vivado/scripts/rt/data/unisim_comp.v:82804]
-INFO: [Synth 8-6157] synthesizing module 'MMCME2_ADV' [/tools/Xilinx/2025.2/Vivado/scripts/rt/data/unisim_comp.v:95844]
+INFO: [Synth 8-6157] synthesizing module 'dotck_mmcm' [c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm.v:69]
+INFO: [Synth 8-6157] synthesizing module 'dotck_mmcm_clk_wiz' [c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm_clk_wiz.v:69]
+INFO: [Synth 8-6157] synthesizing module 'IBUF' [C:/AMDDesignTools/2026.1/Vivado/scripts/rt/data/unisim_comp.v:82818]
+INFO: [Synth 8-6155] done synthesizing module 'IBUF' (0#1) [C:/AMDDesignTools/2026.1/Vivado/scripts/rt/data/unisim_comp.v:82818]
+INFO: [Synth 8-6157] synthesizing module 'MMCME2_ADV' [C:/AMDDesignTools/2026.1/Vivado/scripts/rt/data/unisim_comp.v:95724]
 	Parameter BANDWIDTH bound to: OPTIMIZED - type: string 
 	Parameter CLKFBOUT_MULT_F bound to: 3.912500e+01 - type: double 
 	Parameter CLKFBOUT_PHASE bound to: 0.000000e+00 - type: double 
@@ -63,67 +66,67 @@ INFO: [Synth 8-6157] synthesizing module 'MMCME2_ADV' [/tools/Xilinx/2025.2/Viva
 	Parameter COMPENSATION bound to: ZHOLD - type: string 
 	Parameter DIVCLK_DIVIDE bound to: 5 - type: integer 
 	Parameter STARTUP_WAIT bound to: FALSE - type: string 
-INFO: [Synth 8-6155] done synthesizing module 'MMCME2_ADV' (0#1) [/tools/Xilinx/2025.2/Vivado/scripts/rt/data/unisim_comp.v:95844]
-INFO: [Synth 8-6157] synthesizing module 'BUFG' [/tools/Xilinx/2025.2/Vivado/scripts/rt/data/unisim_comp.v:2678]
-INFO: [Synth 8-6155] done synthesizing module 'BUFG' (0#1) [/tools/Xilinx/2025.2/Vivado/scripts/rt/data/unisim_comp.v:2678]
-INFO: [Synth 8-6155] done synthesizing module 'dotck_mmcm_clk_wiz' (0#1) [/home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm_clk_wiz.v:68]
-INFO: [Synth 8-6155] done synthesizing module 'dotck_mmcm' (0#1) [/home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm.v:68]
+INFO: [Synth 8-6155] done synthesizing module 'MMCME2_ADV' (0#1) [C:/AMDDesignTools/2026.1/Vivado/scripts/rt/data/unisim_comp.v:95724]
+INFO: [Synth 8-6157] synthesizing module 'BUFG' [C:/AMDDesignTools/2026.1/Vivado/scripts/rt/data/unisim_comp.v:2678]
+INFO: [Synth 8-6155] done synthesizing module 'BUFG' (0#1) [C:/AMDDesignTools/2026.1/Vivado/scripts/rt/data/unisim_comp.v:2678]
+INFO: [Synth 8-6155] done synthesizing module 'dotck_mmcm_clk_wiz' (0#1) [c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm_clk_wiz.v:69]
+INFO: [Synth 8-6155] done synthesizing module 'dotck_mmcm' (0#1) [c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm.v:69]
 ---------------------------------------------------------------------------------
-Finished RTL Elaboration : Time (s): cpu = 00:00:03 ; elapsed = 00:00:04 . Memory (MB): peak = 2306.945 ; gain = 567.844 ; free physical = 20462 ; free virtual = 31134
+Finished RTL Elaboration : Time (s): cpu = 00:00:12 ; elapsed = 00:00:13 . Memory (MB): peak = 1490.227 ; gain = 698.336
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Handling Custom Attributes
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Handling Custom Attributes : Time (s): cpu = 00:00:03 ; elapsed = 00:00:04 . Memory (MB): peak = 2321.789 ; gain = 582.688 ; free physical = 20458 ; free virtual = 31130
+Finished Handling Custom Attributes : Time (s): cpu = 00:00:12 ; elapsed = 00:00:13 . Memory (MB): peak = 1490.227 ; gain = 698.336
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished RTL Optimization Phase 1 : Time (s): cpu = 00:00:03 ; elapsed = 00:00:04 . Memory (MB): peak = 2321.789 ; gain = 582.688 ; free physical = 20458 ; free virtual = 31130
+Finished RTL Optimization Phase 1 : Time (s): cpu = 00:00:12 ; elapsed = 00:00:13 . Memory (MB): peak = 1490.227 ; gain = 698.336
 ---------------------------------------------------------------------------------
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2327.727 ; gain = 0.000 ; free physical = 20436 ; free virtual = 31109
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 1490.227 ; gain = 0.000
 INFO: [Netlist 29-17] Analyzing 1 Unisim elements for replacement
 INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
 INFO: [Project 1-570] Preparing netlist for logic optimization
 
 Processing XDC Constraints
 Initializing timing engine
-Parsing XDC File [/home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm_ooc.xdc] for cell 'inst'
-Finished Parsing XDC File [/home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm_ooc.xdc] for cell 'inst'
-Parsing XDC File [/home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm_board.xdc] for cell 'inst'
-Finished Parsing XDC File [/home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm_board.xdc] for cell 'inst'
-Parsing XDC File [/home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm.xdc] for cell 'inst'
-Finished Parsing XDC File [/home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm.xdc] for cell 'inst'
-INFO: [Project 1-236] Implementation specific constraints were found while reading constraint file [/home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm.xdc]. These constraints will be ignored for synthesis but will be used in implementation. Impacted constraints are listed in the file [.Xil/dotck_mmcm_propImpl.xdc].
+Parsing XDC File [c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm_ooc.xdc] for cell 'inst'
+Finished Parsing XDC File [c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm_ooc.xdc] for cell 'inst'
+Parsing XDC File [c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm_board.xdc] for cell 'inst'
+Finished Parsing XDC File [c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm_board.xdc] for cell 'inst'
+Parsing XDC File [c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm.xdc] for cell 'inst'
+Finished Parsing XDC File [c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm.xdc] for cell 'inst'
+INFO: [Project 1-236] Implementation specific constraints were found while reading constraint file [c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/dotck_mmcm/dotck_mmcm.xdc]. These constraints will be ignored for synthesis but will be used in implementation. Impacted constraints are listed in the file [.Xil/dotck_mmcm_propImpl.xdc].
 Resolution: To avoid this warning, move constraints listed in [.Xil/dotck_mmcm_propImpl.xdc] to another XDC file and exclude this new file from synthesis with the used_in_synthesis property (File Properties dialog in GUI) and re-run elaboration/synthesis.
 INFO: [Timing 38-2] Deriving generated clocks
-Parsing XDC File [/home/alexthecat123/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1/dont_touch.xdc]
-Finished Parsing XDC File [/home/alexthecat123/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1/dont_touch.xdc]
+Parsing XDC File [C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1/dont_touch.xdc]
+Finished Parsing XDC File [C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1/dont_touch.xdc]
 Completed Processing XDC Constraints
 
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2370.715 ; gain = 0.000 ; free physical = 20408 ; free virtual = 31095
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.001 . Memory (MB): peak = 1490.227 ; gain = 0.000
 INFO: [Project 1-111] Unisim Transformation Summary:
 No Unisim elements were transformed.
 
-Constraint Validation Runtime : Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2370.750 ; gain = 0.000 ; free physical = 20408 ; free virtual = 31095
+Constraint Validation Runtime : Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.023 . Memory (MB): peak = 1490.227 ; gain = 0.000
 INFO: [Designutils 20-5008] Incremental synthesis strategy off
 ---------------------------------------------------------------------------------
-Finished Constraint Validation : Time (s): cpu = 00:00:07 ; elapsed = 00:00:08 . Memory (MB): peak = 2370.750 ; gain = 631.648 ; free physical = 20434 ; free virtual = 31123
+Finished Constraint Validation : Time (s): cpu = 00:00:25 ; elapsed = 00:00:26 . Memory (MB): peak = 1490.227 ; gain = 698.336
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Loading Part and Timing Information
 ---------------------------------------------------------------------------------
 Loading part: xc7a100tcsg324-2
 ---------------------------------------------------------------------------------
-Finished Loading Part and Timing Information : Time (s): cpu = 00:00:07 ; elapsed = 00:00:08 . Memory (MB): peak = 2378.719 ; gain = 639.617 ; free physical = 20434 ; free virtual = 31123
+Finished Loading Part and Timing Information : Time (s): cpu = 00:00:25 ; elapsed = 00:00:26 . Memory (MB): peak = 1490.227 ; gain = 698.336
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Applying 'set_property' XDC Constraints
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished applying 'set_property' XDC Constraints : Time (s): cpu = 00:00:07 ; elapsed = 00:00:08 . Memory (MB): peak = 2378.719 ; gain = 639.617 ; free physical = 20434 ; free virtual = 31121
+Finished applying 'set_property' XDC Constraints : Time (s): cpu = 00:00:25 ; elapsed = 00:00:26 . Memory (MB): peak = 1490.227 ; gain = 698.336
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished RTL Optimization Phase 2 : Time (s): cpu = 00:00:07 ; elapsed = 00:00:08 . Memory (MB): peak = 2378.719 ; gain = 639.617 ; free physical = 20426 ; free virtual = 31116
+Finished RTL Optimization Phase 2 : Time (s): cpu = 00:00:25 ; elapsed = 00:00:26 . Memory (MB): peak = 1490.227 ; gain = 698.336
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start RTL Component Statistics 
@@ -145,25 +148,25 @@ Finished Part Resource Summary
 Start Cross Boundary and Area Optimization
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Cross Boundary and Area Optimization : Time (s): cpu = 00:00:08 ; elapsed = 00:00:08 . Memory (MB): peak = 2378.719 ; gain = 639.617 ; free physical = 20434 ; free virtual = 31125
+Finished Cross Boundary and Area Optimization : Time (s): cpu = 00:00:29 ; elapsed = 00:00:30 . Memory (MB): peak = 1521.336 ; gain = 729.445
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Applying XDC Timing Constraints
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Applying XDC Timing Constraints : Time (s): cpu = 00:00:11 ; elapsed = 00:00:11 . Memory (MB): peak = 2470.719 ; gain = 731.617 ; free physical = 20221 ; free virtual = 30919
+Finished Applying XDC Timing Constraints : Time (s): cpu = 00:00:38 ; elapsed = 00:00:39 . Memory (MB): peak = 1688.992 ; gain = 897.102
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Timing Optimization
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Timing Optimization : Time (s): cpu = 00:00:11 ; elapsed = 00:00:11 . Memory (MB): peak = 2470.719 ; gain = 731.617 ; free physical = 20221 ; free virtual = 30919
+Finished Timing Optimization : Time (s): cpu = 00:00:38 ; elapsed = 00:00:39 . Memory (MB): peak = 1689.254 ; gain = 897.363
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Technology Mapping
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Technology Mapping : Time (s): cpu = 00:00:11 ; elapsed = 00:00:11 . Memory (MB): peak = 2480.734 ; gain = 741.633 ; free physical = 20192 ; free virtual = 30889
+Finished Technology Mapping : Time (s): cpu = 00:00:38 ; elapsed = 00:00:39 . Memory (MB): peak = 1698.848 ; gain = 906.957
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start IO Insertion
@@ -181,37 +184,37 @@ Start Final Netlist Cleanup
 Finished Final Netlist Cleanup
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished IO Insertion : Time (s): cpu = 00:00:13 ; elapsed = 00:00:13 . Memory (MB): peak = 2667.547 ; gain = 928.445 ; free physical = 19725 ; free virtual = 30422
+Finished IO Insertion : Time (s): cpu = 00:00:45 ; elapsed = 00:00:46 . Memory (MB): peak = 1974.777 ; gain = 1182.887
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Renaming Generated Instances
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Renaming Generated Instances : Time (s): cpu = 00:00:13 ; elapsed = 00:00:13 . Memory (MB): peak = 2667.547 ; gain = 928.445 ; free physical = 19725 ; free virtual = 30422
+Finished Renaming Generated Instances : Time (s): cpu = 00:00:45 ; elapsed = 00:00:46 . Memory (MB): peak = 1974.777 ; gain = 1182.887
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Rebuilding User Hierarchy
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Rebuilding User Hierarchy : Time (s): cpu = 00:00:13 ; elapsed = 00:00:13 . Memory (MB): peak = 2667.547 ; gain = 928.445 ; free physical = 19725 ; free virtual = 30422
+Finished Rebuilding User Hierarchy : Time (s): cpu = 00:00:45 ; elapsed = 00:00:46 . Memory (MB): peak = 1974.777 ; gain = 1182.887
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Renaming Generated Ports
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Renaming Generated Ports : Time (s): cpu = 00:00:13 ; elapsed = 00:00:13 . Memory (MB): peak = 2667.547 ; gain = 928.445 ; free physical = 19725 ; free virtual = 30422
+Finished Renaming Generated Ports : Time (s): cpu = 00:00:45 ; elapsed = 00:00:46 . Memory (MB): peak = 1974.777 ; gain = 1182.887
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Handling Custom Attributes
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Handling Custom Attributes : Time (s): cpu = 00:00:13 ; elapsed = 00:00:13 . Memory (MB): peak = 2667.547 ; gain = 928.445 ; free physical = 19725 ; free virtual = 30422
+Finished Handling Custom Attributes : Time (s): cpu = 00:00:45 ; elapsed = 00:00:46 . Memory (MB): peak = 1974.777 ; gain = 1182.887
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Renaming Generated Nets
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Renaming Generated Nets : Time (s): cpu = 00:00:13 ; elapsed = 00:00:13 . Memory (MB): peak = 2667.547 ; gain = 928.445 ; free physical = 19725 ; free virtual = 30422
+Finished Renaming Generated Nets : Time (s): cpu = 00:00:45 ; elapsed = 00:00:46 . Memory (MB): peak = 1974.777 ; gain = 1182.887
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Writing Synthesis Report
@@ -232,32 +235,30 @@ Report Cell Usage:
 |3     |IBUF       |     1|
 +------+-----------+------+
 ---------------------------------------------------------------------------------
-Finished Writing Synthesis Report : Time (s): cpu = 00:00:13 ; elapsed = 00:00:13 . Memory (MB): peak = 2667.547 ; gain = 928.445 ; free physical = 19725 ; free virtual = 30422
+Finished Writing Synthesis Report : Time (s): cpu = 00:00:45 ; elapsed = 00:00:46 . Memory (MB): peak = 1974.777 ; gain = 1182.887
 ---------------------------------------------------------------------------------
 Synthesis finished with 0 errors, 0 critical warnings and 0 warnings.
-Synthesis Optimization Runtime : Time (s): cpu = 00:00:12 ; elapsed = 00:00:12 . Memory (MB): peak = 2667.547 ; gain = 879.484 ; free physical = 19717 ; free virtual = 30414
-Synthesis Optimization Complete : Time (s): cpu = 00:00:13 ; elapsed = 00:00:13 . Memory (MB): peak = 2667.555 ; gain = 928.445 ; free physical = 19717 ; free virtual = 30414
+Synthesis Optimization Runtime : Time (s): cpu = 00:00:30 ; elapsed = 00:00:43 . Memory (MB): peak = 1974.777 ; gain = 1182.887
+Synthesis Optimization Complete : Time (s): cpu = 00:00:45 ; elapsed = 00:00:47 . Memory (MB): peak = 1974.777 ; gain = 1182.887
 INFO: [Project 1-571] Translating synthesized netlist
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2667.555 ; gain = 0.000 ; free physical = 19717 ; free virtual = 30415
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 1974.777 ; gain = 0.000
 INFO: [Netlist 29-17] Analyzing 1 Unisim elements for replacement
 INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
 INFO: [Project 1-570] Preparing netlist for logic optimization
 INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2667.555 ; gain = 0.000 ; free physical = 20368 ; free virtual = 31069
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 1987.582 ; gain = 0.000
 INFO: [Project 1-111] Unisim Transformation Summary:
 No Unisim elements were transformed.
 
 Synth Design complete | Checksum: 6aeb9d54
-INFO: [Common 17-83] Releasing license: Synthesis
-29 Infos, 0 Warnings, 0 Critical Warnings and 0 Errors encountered.
+INFO: [Common 17-83] Releasing license: Vivado_Synthesis
+30 Infos, 0 Warnings, 0 Critical Warnings and 0 Errors encountered.
 synth_design completed successfully
-synth_design: Time (s): cpu = 00:00:16 ; elapsed = 00:00:55 . Memory (MB): peak = 2667.582 ; gain = 1043.746 ; free physical = 20368 ; free virtual = 31069
-INFO: [Common 17-2834] synth_design peak Physical Memory [PSS] (MB): overall = 1644.173; main = 1644.173; forked = 215.252
-INFO: [Common 17-2834] synth_design peak Virtual Memory [VSS] (MB): overall = 3374.953; main = 2667.551; forked = 996.230
-Write ShapeDB Complete: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2691.559 ; gain = 0.000 ; free physical = 20368 ; free virtual = 31069
-INFO: [Common 17-1381] The checkpoint '/home/alexthecat123/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1/dotck_mmcm.dcp' has been generated.
-INFO: [Coretcl 2-1648] Added synthesis output to IP cache for IP dotck_mmcm, cache-ID = 6358da6e68532212
-Write ShapeDB Complete: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2691.559 ; gain = 0.000 ; free physical = 20379 ; free virtual = 31080
-INFO: [Common 17-1381] The checkpoint '/home/alexthecat123/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1/dotck_mmcm.dcp' has been generated.
+synth_design: Time (s): cpu = 00:00:52 ; elapsed = 00:00:54 . Memory (MB): peak = 1987.582 ; gain = 1390.867
+Write ShapeDB Complete: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.001 . Memory (MB): peak = 1987.582 ; gain = 0.000
+INFO: [Common 17-1381] The checkpoint 'C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1/dotck_mmcm.dcp' has been generated.
+INFO: [Ipptcl 7-1612] Added synthesis output to IP cache for IP dotck_mmcm, cache-ID = 09d33ed93eb85e80
+Write ShapeDB Complete: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 1987.582 ; gain = 0.000
+INFO: [Common 17-1381] The checkpoint 'C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/dotck_mmcm_synth_1/dotck_mmcm.dcp' has been generated.
 INFO: [Vivado 12-24828] Executing command : report_utilization -file dotck_mmcm_utilization_synth.rpt -pb dotck_mmcm_utilization_synth.pb
-INFO: [Common 17-206] Exiting Vivado at Fri Jun 26 13:27:45 2026...
+INFO: [Common 17-206] Exiting Vivado at Thu Jul 30 17:08:10 2026...

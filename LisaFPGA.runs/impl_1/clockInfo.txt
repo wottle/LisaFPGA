@@ -1,7 +1,7 @@
 -------------------------------------
-| Tool Version : Vivado v.2025.2
-| Date         : Thu Jul  9 14:39:08 2026
-| Host         : alex-cattop
+| Tool Version : Vivado v.2026.1
+| Date         : Fri Aug 14 08:18:18 2026
+| Host         : DESKTOP-78VBNFB
 | Design       : design_1
 | Device       : xc7a100t-csg324-2--
 -------------------------------------

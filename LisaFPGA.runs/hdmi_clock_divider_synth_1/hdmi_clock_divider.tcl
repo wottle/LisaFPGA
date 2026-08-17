@@ -4,7 +4,7 @@
 
 set TIME_start [clock seconds] 
 namespace eval ::optrace {
-  variable script "/home/alexthecat123/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider.tcl"
+  variable script "C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider.tcl"
   variable category "vivado_synth"
 }
 
@@ -66,19 +66,19 @@ set_param project.singleFileAddWarning.threshold 0
 set_param project.compositeFile.enableAutoGeneration 0
 set_param synth.vivado.isSynthRun true
 set_msg_config -source 4 -id {IP_Flow 19-2162} -severity warning -new_severity info
-set_property webtalk.parent_dir /home/alexthecat123/LisaFPGA/LisaFPGA.cache/wt [current_project]
-set_property parent.project_path /home/alexthecat123/LisaFPGA/LisaFPGA.xpr [current_project]
+set_property webtalk.parent_dir C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.cache/wt [current_project]
+set_property parent.project_path C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.xpr [current_project]
 set_property XPM_LIBRARIES XPM_CDC [current_project]
 set_property default_lib xil_defaultlib [current_project]
 set_property target_language Verilog [current_project]
-set_property ip_output_repo /home/alexthecat123/LisaFPGA/LisaFPGA.cache/ip [current_project]
+set_property ip_output_repo c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.cache/ip [current_project]
 set_property ip_cache_permissions {read write} [current_project]
 OPTRACE "Creating in-memory project" END { }
 OPTRACE "Adding files" START { }
-read_ip -quiet /home/alexthecat123/LisaFPGA/LisaFPGA.srcs/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider.xci
-set_property used_in_implementation false [get_files -all /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_board.xdc]
-set_property used_in_implementation false [get_files -all /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider.xdc]
-set_property used_in_implementation false [get_files -all /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_ooc.xdc]
+read_ip -quiet C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.srcs/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider.xci
+set_property used_in_implementation false [get_files -all c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_board.xdc]
+set_property used_in_implementation false [get_files -all c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider.xdc]
+set_property used_in_implementation false [get_files -all c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_ooc.xdc]
 
 OPTRACE "Adding files" END { }
 # Mark all dcp files as not used in implementation to prevent them from being
@@ -94,7 +94,7 @@ set_property used_in_implementation false [get_files dont_touch.xdc]
 set_param ips.enableIPCacheLiteLoad 1
 OPTRACE "Configure IP Cache" START { }
 
-set cacheID [config_ip_cache -export -no_bom  -dir /home/alexthecat123/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1 -new_name hdmi_clock_divider -ip [get_ips hdmi_clock_divider]]
+set cacheID [config_ip_cache -export -no_bom  -dir C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1 -new_name hdmi_clock_divider -ip [get_ips hdmi_clock_divider]]
 
 OPTRACE "Configure IP Cache" END { }
 if { $cacheID == "" } {
@@ -149,32 +149,32 @@ generate_parallel_reports -reports { "report_utilization -file hdmi_clock_divide
 OPTRACE "synth reports" END { }
 
 if { [catch {
-  file copy -force /home/alexthecat123/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider.dcp /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider.dcp
+  file copy -force C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider.dcp c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider.dcp
 } _RESULT ] } { 
   send_msg_id runtcl-3 status "ERROR: Unable to successfully create or copy the sub-design checkpoint file."
   error "ERROR: Unable to successfully create or copy the sub-design checkpoint file."
 }
 
 if { [catch {
-  write_verilog -force -mode synth_stub /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_stub.v
+  write_verilog -force -mode synth_stub c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_stub.v
 } _RESULT ] } { 
   puts "CRITICAL WARNING: Unable to successfully create a Verilog synthesis stub for the sub-design. This may lead to errors in top level synthesis of the design. Error reported: $_RESULT"
 }
 
 if { [catch {
-  write_vhdl -force -mode synth_stub /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_stub.vhdl
-} _RESULT ] } { 
-  puts "CRITICAL WARNING: Unable to successfully create a VHDL synthesis stub for the sub-design. This may lead to errors in top level synthesis of the design. Error reported: $_RESULT"
-}
-
-if { [catch {
-  write_verilog -force -mode funcsim /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_sim_netlist.v
+  write_verilog -force -mode funcsim c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_sim_netlist.v
 } _RESULT ] } { 
   puts "CRITICAL WARNING: Unable to successfully create the Verilog functional simulation sub-design file. Post-Synthesis Functional Simulation with this file may not be possible or may give incorrect results. Error reported: $_RESULT"
 }
 
 if { [catch {
-  write_vhdl -force -mode funcsim /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_sim_netlist.vhdl
+  write_vhdl -force -mode synth_stub c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_stub.vhdl
+} _RESULT ] } { 
+  puts "CRITICAL WARNING: Unable to successfully create a VHDL synthesis stub for the sub-design. This may lead to errors in top level synthesis of the design. Error reported: $_RESULT"
+}
+
+if { [catch {
+  write_vhdl -force -mode funcsim c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_sim_netlist.vhdl
 } _RESULT ] } { 
   puts "CRITICAL WARNING: Unable to successfully create the VHDL functional simulation sub-design file. Post-Synthesis Functional Simulation with this file may not be possible or may give incorrect results. Error reported: $_RESULT"
 }
@@ -184,32 +184,32 @@ if { [catch {
 
 
 if { [catch {
-  file copy -force /home/alexthecat123/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider.dcp /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider.dcp
+  file copy -force C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider.dcp c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider.dcp
 } _RESULT ] } { 
   send_msg_id runtcl-3 status "ERROR: Unable to successfully create or copy the sub-design checkpoint file."
   error "ERROR: Unable to successfully create or copy the sub-design checkpoint file."
 }
 
 if { [catch {
-  file rename -force /home/alexthecat123/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider_stub.v /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_stub.v
+  file rename -force C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider_stub.v c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_stub.v
 } _RESULT ] } { 
   puts "CRITICAL WARNING: Unable to successfully create a Verilog synthesis stub for the sub-design. This may lead to errors in top level synthesis of the design. Error reported: $_RESULT"
 }
 
 if { [catch {
-  file rename -force /home/alexthecat123/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider_stub.vhdl /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_stub.vhdl
+  file rename -force C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider_stub.vhdl c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_stub.vhdl
 } _RESULT ] } { 
   puts "CRITICAL WARNING: Unable to successfully create a VHDL synthesis stub for the sub-design. This may lead to errors in top level synthesis of the design. Error reported: $_RESULT"
 }
 
 if { [catch {
-  file rename -force /home/alexthecat123/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider_sim_netlist.v /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_sim_netlist.v
+  file rename -force C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider_sim_netlist.v c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_sim_netlist.v
 } _RESULT ] } { 
   puts "CRITICAL WARNING: Unable to successfully create the Verilog functional simulation sub-design file. Post-Synthesis Functional Simulation with this file may not be possible or may give incorrect results. Error reported: $_RESULT"
 }
 
 if { [catch {
-  file rename -force /home/alexthecat123/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider_sim_netlist.vhdl /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_sim_netlist.vhdl
+  file rename -force C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.runs/hdmi_clock_divider_synth_1/hdmi_clock_divider_sim_netlist.vhdl c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_sim_netlist.vhdl
 } _RESULT ] } { 
   puts "CRITICAL WARNING: Unable to successfully create the VHDL functional simulation sub-design file. Post-Synthesis Functional Simulation with this file may not be possible or may give incorrect results. Error reported: $_RESULT"
 }
@@ -217,15 +217,15 @@ if { [catch {
 close [open .end.used_ip_cache.rst w]
 }; # end if cacheID 
 
-if {[file isdir /home/alexthecat123/LisaFPGA/LisaFPGA.ip_user_files/ip/hdmi_clock_divider]} {
+if {[file isdir C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.ip_user_files/ip/hdmi_clock_divider]} {
   catch { 
-    file copy -force /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_stub.v /home/alexthecat123/LisaFPGA/LisaFPGA.ip_user_files/ip/hdmi_clock_divider
+    file copy -force c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_stub.v C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.ip_user_files/ip/hdmi_clock_divider
   }
 }
 
-if {[file isdir /home/alexthecat123/LisaFPGA/LisaFPGA.ip_user_files/ip/hdmi_clock_divider]} {
+if {[file isdir C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.ip_user_files/ip/hdmi_clock_divider]} {
   catch { 
-    file copy -force /home/alexthecat123/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_stub.vhdl /home/alexthecat123/LisaFPGA/LisaFPGA.ip_user_files/ip/hdmi_clock_divider
+    file copy -force c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.gen/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider_stub.vhdl C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.ip_user_files/ip/hdmi_clock_divider
   }
 }
 file delete __synthesis_is_running__

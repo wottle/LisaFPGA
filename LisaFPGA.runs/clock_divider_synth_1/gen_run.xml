@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<GenRun Id="clock_divider_synth_1" LaunchPart="xc7a100tcsg324-2" LaunchTime="1782494804">
-  <File Type="RDS-DCP" Name="clock_divider.dcp"/>
-  <File Type="RDS-RDS" Name="clock_divider.vds"/>
+<GenRun Id="clock_divider_synth_1" LaunchPart="xc7a100tcsg324-2" LaunchTime="1785456417">
   <File Type="REPORTS-TCL" Name="clock_divider_reports.tcl"/>
-  <File Type="PA-TCL" Name="clock_divider.tcl"/>
   <File Type="RDS-UTIL" Name="clock_divider_utilization_synth.rpt"/>
   <File Type="RDS-UTIL-PB" Name="clock_divider_utilization_synth.pb"/>
+  <File Type="PA-TCL" Name="clock_divider.tcl"/>
+  <File Type="RDS-RDS" Name="clock_divider.vds"/>
+  <File Type="RDS-DCP" Name="clock_divider.dcp"/>
   <FileSet Name="sources" Type="BlockSrcs" RelSrcDir="$PSRCDIR/clock_divider" RelGenDir="$PGENDIR/clock_divider">
     <File Path="$PSRCDIR/sources_1/ip/clock_divider/clock_divider.xci">
       <FileInfo>
@@ -39,7 +39,7 @@
     </Config>
   </FileSet>
   <Strategy Version="1" Minor="2">
-    <StratHandle Name="Vivado Synthesis Defaults" Flow="Vivado Synthesis 2025"/>
+    <StratHandle Name="Vivado Synthesis Defaults" Flow="Vivado Synthesis 2026"/>
     <Step Id="synth_design"/>
   </Strategy>
 </GenRun>

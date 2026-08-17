@@ -567,6 +567,14 @@ module HDMI_Interface #(
 
     (* ASYNC_REG = "TRUE" *) logic [2:0] btn_int, btn_sync;
     logic prev_cy_zero, frame_tick;
+    // Feedback for a repeat save. settings_valid_q is sticky -- it means "a valid block exists in flash" --
+    // so once the first save lands the row reads SAVED forever and a second save produces no visible change,
+    // even though it really did write. This counter forces the row to show SAVING for a minimum number of
+    // frames so every press gives feedback. The write itself is far shorter than that (a 4KB sector erase is
+    // ~45ms), so without the hold the transition would flicker past in two or three frames.
+    logic [5:0] save_disp_cnt = 6'd0;
+    logic save_active;
+    assign save_active = settings_save_req || (save_disp_cnt != 6'd0);
     logic [10:0] step_amount, next_value;
     assign step_amount = coarse_step ? 11'd8 : 11'd1;
     // What the selected register becomes after this frame's button state, saturating at both ends
@@ -605,6 +613,10 @@ module HDMI_Interface #(
         end
 
         if (ALIGNMENT_TUNING_MODE && frame_tick) begin
+            // Runs before the button handling below, so a fresh SEL press re-arms the counter rather than
+            // having its reload immediately decremented in the same frame.
+            if (save_disp_cnt != 6'd0) save_disp_cnt <= save_disp_cnt - 1'b1;
+
             // Hold off initialising until the flash read has finished, so a saved block wins over the
             // compile-time defaults rather than being briefly overwritten by them. If the block is
             // missing or its checksum failed, settings_valid is low and we fall back to defaults --
@@ -678,6 +690,7 @@ module HDMI_Interface #(
                                         {5'b0, h_offset_1080p}
                                     };
                                     settings_save_req <= 1'b1;
+                                    save_disp_cnt     <= 6'd30;  // ~0.5s at 60Hz, ~1s at 30Hz
                                 end
                                 default: menu_active <= 1'b0;                              // EXIT
                             endcase
@@ -1017,7 +1030,7 @@ module HDMI_Interface #(
             1: menu_label = "ADJUST IMAGE    ";
             2: menu_label = "SCANLINES       ";
             3: menu_label = "MAX CONTRAST    ";
-            4: menu_label = "SETTINGS        ";
+            4: menu_label = "SAVE SETTINGS   ";
             default: menu_label = "EXIT            ";
         endcase
     endfunction
@@ -1030,13 +1043,14 @@ module HDMI_Interface #(
             5: menu_value = " 1080P60"; // Only reachable in a stock (OUTPUT_1024X768 = 0) build
             6: menu_value = "   SAVED"; // A valid settings block was found in flash
             7: menu_value = " DEFAULT"; // Blank or bad checksum -- compile-time defaults in use
+            8: menu_value = "  SAVING"; // Transient, held briefly so a repeat save is visible
             default: menu_value = "        ";
         endcase
     endfunction
 
     (* rom_style = "distributed" *) logic [7:0] font_rom   [0:511];
     (* rom_style = "distributed" *) logic [5:0] label_rom  [0:95];  // 6 rows x 16 chars
-    (* rom_style = "distributed" *) logic [5:0] value_rom  [0:63];  // 8 strings x 8 chars
+    (* rom_style = "distributed" *) logic [5:0] value_rom  [0:127]; // 16 slots x 8 chars (9 used)
     logic [63:0] glyph_tmp;
     logic [127:0] label_tmp;
     logic [63:0] value_tmp;
@@ -1049,8 +1063,9 @@ module HDMI_Interface #(
             label_tmp = menu_label(i);
             for (int j = 0; j < 16; j = j + 1) label_rom[i*16 + j] = ascii_glyph(label_tmp[8*(15-j) +: 8]);
         end
-        // Eight value strings: blank, 1080P30, 1024X768, ON, OFF, 1080P60, SAVED, DEFAULT
-        for (int i = 0; i < 8; i = i + 1) begin
+        // Value strings: blank, 1080P30, 1024X768, ON, OFF, 1080P60, SAVED, DEFAULT, SAVING.
+        // Fill all 16 slots (menu_value's default is blank) so no index can read an uninitialised entry.
+        for (int i = 0; i < 16; i = i + 1) begin
             value_tmp = menu_value(i);
             for (int j = 0; j < 8; j = j + 1) value_rom[i*8 + j] = ascii_glyph(value_tmp[8*(7-j) +: 8]);
         end
@@ -1115,7 +1130,8 @@ module HDMI_Interface #(
     logic menu_on, menu_pixel, menu_highlight;
     logic [11:0] mdx;
     logic [10:0] mdy;
-    logic [2:0] m_row, m_vid;
+    logic [2:0] m_row;
+    logic [3:0] m_vid;
     logic [4:0] m_col;
     logic [5:0] m_glyph;
     logic [3:0] hex_nib;
@@ -1129,12 +1145,13 @@ module HDMI_Interface #(
         case (m_row)
             // What the second mode actually IS depends on the build, so name it accordingly rather than
             // assuming 1024x768: a stock build's second position is 1080p60
-            3'd0: m_vid = (video_mode == 2'd0) ? 3'd1 : (video_mode == 2'd1) ? 3'd5 : 3'd2; // 1080P30 / 1080P60 / 1024X768
-            3'd1: m_vid = tuning_active ? 3'd3 : 3'd4; // ON / OFF
-            3'd2: m_vid = scanlines_eff ? 3'd3 : 3'd4;
-            3'd3: m_vid = contrast_eff  ? 3'd3 : 3'd4;
-            3'd4: m_vid = settings_valid_q ? 3'd6 : 3'd7; // SAVED / DEFAULT
-            default: m_vid = 3'd0;                        // EXIT has no value
+            3'd0: m_vid = (video_mode == 2'd0) ? 4'd1 : (video_mode == 2'd1) ? 4'd5 : 4'd2; // 1080P30 / 1080P60 / 1024X768
+            3'd1: m_vid = tuning_active ? 4'd3 : 4'd4; // ON / OFF
+            3'd2: m_vid = scanlines_eff ? 4'd3 : 4'd4;
+            3'd3: m_vid = contrast_eff  ? 4'd3 : 4'd4;
+            // SAVING wins over both, so a repeat save on an already-saved board still shows something happening
+            3'd4: m_vid = save_active ? 4'd8 : (settings_valid_q ? 4'd6 : 4'd7);
+            default: m_vid = 4'd0;                        // EXIT has no value
         endcase
         // Columns 0-15 are the label, 16-23 the value (m_col[2:0] conveniently gives 0-7 there).
         // The SETTINGS row is special when nothing is saved: instead of a fixed string it shows the
@@ -1146,7 +1163,7 @@ module HDMI_Interface #(
         hex_nib = jedec_id[hex_idx*4 +: 4];
         if (m_col < 5'd16) begin
             m_glyph = label_rom[{m_row, m_col[3:0]}];
-        end else if (m_row == 3'd4 && !settings_valid_q) begin
+        end else if (m_row == 3'd4 && !settings_valid_q && !save_active) begin
             if (m_col[2:0] < 3'd2) m_glyph = 6'd10;                       // leading spaces
             else if (hex_nib < 4'd10) m_glyph = 6'(hex_nib);              // 0-9
             else m_glyph = 6'd12 + 6'(hex_nib) - 6'd10;                   // A-F

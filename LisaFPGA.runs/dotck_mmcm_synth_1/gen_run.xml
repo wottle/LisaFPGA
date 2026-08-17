@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<GenRun Id="dotck_mmcm_synth_1" LaunchPart="xc7a100tcsg324-2" LaunchTime="1782494804">
-  <File Type="RDS-DCP" Name="dotck_mmcm.dcp"/>
-  <File Type="RDS-RDS" Name="dotck_mmcm.vds"/>
+<GenRun Id="dotck_mmcm_synth_1" LaunchPart="xc7a100tcsg324-2" LaunchTime="1785456417">
   <File Type="REPORTS-TCL" Name="dotck_mmcm_reports.tcl"/>
-  <File Type="PA-TCL" Name="dotck_mmcm.tcl"/>
   <File Type="RDS-UTIL" Name="dotck_mmcm_utilization_synth.rpt"/>
   <File Type="RDS-UTIL-PB" Name="dotck_mmcm_utilization_synth.pb"/>
+  <File Type="PA-TCL" Name="dotck_mmcm.tcl"/>
+  <File Type="RDS-RDS" Name="dotck_mmcm.vds"/>
+  <File Type="RDS-DCP" Name="dotck_mmcm.dcp"/>
   <FileSet Name="sources" Type="BlockSrcs" RelSrcDir="$PSRCDIR/dotck_mmcm" RelGenDir="$PGENDIR/dotck_mmcm">
     <File Path="$PSRCDIR/sources_1/ip/dotck_mmcm/dotck_mmcm.xci">
       <FileInfo>
@@ -39,7 +39,7 @@
     </Config>
   </FileSet>
   <Strategy Version="1" Minor="2">
-    <StratHandle Name="Vivado Synthesis Defaults" Flow="Vivado Synthesis 2025"/>
+    <StratHandle Name="Vivado Synthesis Defaults" Flow="Vivado Synthesis 2026"/>
     <Step Id="synth_design"/>
   </Strategy>
 </GenRun>
