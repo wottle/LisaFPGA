@@ -171,19 +171,19 @@ if ! arduino-cli core list 2>/dev/null | grep -q "esp32:esp32"; then
 fi
 ok "ESP32 Arduino core: $(arduino-cli core list 2>/dev/null | grep esp32:esp32)"
 
-# SDFat library (required by ESProFile)
-if ! arduino-cli lib list 2>/dev/null | grep -q "^SDFat"; then
-    info "Installing SDFat Arduino library..."
-    arduino-cli lib install "SDFat"
+# SdFat library (required by ESProFile)
+if ! arduino-cli lib list 2>/dev/null | grep -q "^SdFat"; then
+    info "Installing SdFat Arduino library..."
+    arduino-cli lib install "SdFat"
 fi
-ok "SDFat: $(arduino-cli lib list 2>/dev/null | grep '^SDFat' | awk '{print $1, $2}')"
+ok "SdFat: $(arduino-cli lib list 2>/dev/null | grep '^SdFat' | awk '{print $1, $2}')"
 
-# Adafruit SH110X library (required by ESFloppy)
-if ! arduino-cli lib list 2>/dev/null | grep -q "^Adafruit SH110X"; then
-    info "Installing Adafruit SH110X Arduino library..."
-    arduino-cli lib install "Adafruit SH110X"
+# U8g2 library (required by ESFloppy)
+if ! arduino-cli lib list 2>/dev/null | grep -q "^U8g2"; then
+    info "Installing U8g2 Arduino library..."
+    arduino-cli lib install "U8g2"
 fi
-ok "Adafruit SH110X: $(arduino-cli lib list 2>/dev/null | grep '^Adafruit SH110X' | awk '{print $1, $2}')"
+ok "U8g2: $(arduino-cli lib list 2>/dev/null | grep '^U8g2' | awk '{print $1, $2}')"
 
 # openFPGALoader
 if ! command -v openFPGALoader &>/dev/null; then
@@ -690,31 +690,17 @@ sleep 3
 # ═══════════════════════════════════════════════════════════════════════════════
 step "Get ESFloppy Firmware"
 
-ESFLOPPY_DIR="$SCRIPT_DIR/ESFloppy_stub" # Change this line back to ESFloppy once it's working
-# Comment these lines back in once ESFloppy is working!
-#if [[ -d "$ESFLOPPY_DIR/.git" ]]; then
-#    info "ESFloppy repo already exists locally, pulling latest..."
-#    git -C "$ESFLOPPY_DIR" pull
-#else
-#    info "Cloning ESFloppy repo..."
-#    git clone https://github.com/alexthecat123/ESFloppy.git "$ESFLOPPY_DIR"
-#fi
-
-ESFLOPPY_INO_DIR="$ESFLOPPY_DIR/ESFloppy_stub" # Same for these; change back to ESFloppy/ESFloppy.ino once it's working
-ESFLOPPY_INO="$ESFLOPPY_INO_DIR/ESFloppy_stub.ino"
-
-# ESFloppy uses the same LisaFPGA/standalone pattern
-if [[ -f "$ESFLOPPY_INO" ]]; then
-    if grep -q "PinDefs_ESFloppy\|PinDefs_LisaFPGA\|PinDefs_Standalone" "$ESFLOPPY_INO" 2>/dev/null; then
-        info "Patching ESFloppy.ino for LisaFPGA pin defs..."
-        sed -i.bak \
-            -e 's|^\(#include "PinDefs_ESFloppy\.h"\)|//\1|' \
-            -e 's|^\(#include "PinDefs_Standalone\.h"\)|//\1|' \
-            -e 's|^//\s*\(#include "PinDefs_LisaFPGA\.h"\)|\1|' \
-            "$ESFLOPPY_INO"
-        ok "ESFloppy.ino patched"
-    fi
+ESFLOPPY_DIR="$SCRIPT_DIR/ESFloppy" # Change this line back to ESFloppy once it's working
+if [[ -d "$ESFLOPPY_DIR/.git" ]]; then
+    info "ESFloppy repo already exists locally, pulling latest..."
+    git -C "$ESFLOPPY_DIR" pull
+else
+    info "Cloning ESFloppy repo..."
+    git clone https://github.com/alexthecat123/ESFloppy.git "$ESFLOPPY_DIR"
 fi
+
+ESFLOPPY_INO_DIR="$ESFLOPPY_DIR/ESFloppy"
+ESFLOPPY_INO="$ESFLOPPY_INO_DIR/ESFloppy.ino"
 
 step "Compile/Upload ESFloppy Firmware"
 info "Compiling ESFloppy for ESP32-S3..."
