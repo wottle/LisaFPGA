@@ -417,6 +417,8 @@ Feel free to email me at [alexelectronicsguy@gmail.com](mailto:alexelectronicsgu
 
 8/18/2026 - Updated readme and programming script to use/reference the now-released ESFloppy firmware.
 
+8/19/2026 - Fixed program_board.sh USB enumeration to work on latest macOS version (Tahoe). Also hopefully fixed a bug where cmake can't find the build directory when building openFPGALoader from source by just creating the directory manually; it seems that cmake automatically makes the directory under some Linux distros but not others.
+
 # Appendix - Jumpers, Switches, Buttons, and LEDs
 There are quite a lot of switches, jumpers, buttons, and LEDs on the LisaFPGA board. Here's a table explaining what each one does, along with longer explanations whenever necessary.
 

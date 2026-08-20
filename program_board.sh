@@ -196,6 +196,7 @@ if ! command -v openFPGALoader &>/dev/null; then
                     pkg-config zlib1g-dev
                 TMP_OFL="$(mktemp -d)"
                 git clone --depth 1 https://github.com/trabucayre/openFPGALoader.git "$TMP_OFL"
+                mkdir -p "$TMP_OFL/build"
                 cmake -S "$TMP_OFL" -B "$TMP_OFL/build" -DCMAKE_BUILD_TYPE=Release
                 make -C "$TMP_OFL/build" -j"$(nproc)"
                 if [[ $EUID -eq 0 ]]; then
@@ -310,69 +311,64 @@ PYEOF
 
 # ── macOS: find /dev/cu.* for ESP32 at hub port N ────────────────────────────
 # We use locationID: each nibble encodes a hub port level.
+# Reads the USB tree from ioreg instead of system_profiler, because
+# SPUSBDataType sometimes returns an empty list even while every device
+# is enumerated and visible in ioreg.
 macos_tty_for_hub_port() {
     local port="$1"   # 2 or 3
     python3 - "$HUB_VID" "$HUB_PID" "$port" <<'PYEOF'
-import subprocess, sys, re, json
+import subprocess, sys, plistlib
 
-hub_vid_str = "0x" + sys.argv[1].upper()
-hub_pid_str = "0x" + sys.argv[2].upper()
+hub_vid = int(sys.argv[1], 16)
+hub_pid = int(sys.argv[2], 16)
 target_port = int(sys.argv[3])
 
 try:
     raw = subprocess.check_output(
-        ['system_profiler', 'SPUSBDataType', '-json'],
-        text=True, stderr=subprocess.DEVNULL
+        ['ioreg', '-a', '-r', '-c', 'IOUSBHostDevice', '-l'],
+        stderr=subprocess.DEVNULL
     )
-    data = json.loads(raw)
+    roots = plistlib.loads(raw)
 except Exception:
     sys.exit(1)
 
-def hub_port_from_location(hub_loc_str, child_loc_str):
-    """Derive the physical hub port from location IDs.
-    macOS encodes each port level as a nibble: hub at 0x01100000 has
-    children at 0x0111xxxx (port 1), 0x0112xxxx (port 2), etc.
-    system_profiler does NOT list _items in port order, so we must
-    compute the port from the location_id rather than using the array index."""
-    try:
-        hub_loc   = int(hub_loc_str.split()[0], 16)
-        child_loc = int(child_loc_str.split()[0], 16)
-        trailing  = (hub_loc & -hub_loc).bit_length() - 1  # trailing zero bits
-        return (child_loc >> (trailing - 4)) & 0xF
-    except Exception:
-        return -1
+def walk(node):
+    yield node
+    for child in node.get('IORegistryEntryChildren', []):
+        yield from walk(child)
 
-def scan(items):
-    for item in items:
-        vid = item.get('vendor_id', '').upper().replace('0X', '0x')
-        pid = item.get('product_id', '').upper().replace('0X', '0x')
-        if hub_vid_str in vid and hub_pid_str in pid:
-            hub_loc_str = item.get('location_id', '')
-            for child in item.get('_items', []):
-                child_loc_str = child.get('location_id', '')
-                if hub_port_from_location(hub_loc_str, child_loc_str) != target_port:
-                    continue
-                child_serial = child.get('serial_num', '')
-                if child_serial:
-                    try:
-                        out = subprocess.check_output(
-                            ['ioreg', '-r', '-c', 'IOUSBHostDevice', '-l'],
-                            text=True, stderr=subprocess.DEVNULL
-                        )
-                        m = re.search(
-                            r'"IOCalloutDevice"\s*=\s*"(/dev/[^"]+)"',
-                            out[out.find(child_serial):]
-                        )
-                        if m:
-                            print(m.group(1))
-                            sys.exit(0)
-                    except Exception:
-                        pass
-        sub = item.get('_items', [])
-        if sub:
-            scan(sub)
+def port_nibble_shift(hub_loc):
+    """macOS locationIDs encode one hub level per nibble. A child on
+    port N of a hub at 0x08320000 sits at 0x0832N000. The port nibble
+    is the one just below the hub's lowest nonzero nibble. Working in
+    whole nibbles (not trailing zero bits) keeps the math right when
+    the hub's own port number is even."""
+    shift = 0
+    while shift < 32 and ((hub_loc >> shift) & 0xF) == 0:
+        shift += 4
+    return shift - 4
 
-scan(data.get('SPUSBDataType', []))
+for root in roots:
+    for hub in walk(root):
+        if hub.get('idVendor') != hub_vid or hub.get('idProduct') != hub_pid:
+            continue
+        hub_loc = hub.get('locationID')
+        if hub_loc is None:
+            continue
+        shift = port_nibble_shift(hub_loc)
+        if shift < 0:
+            continue
+        want_loc = hub_loc | (target_port << shift)
+        for child in walk(hub):
+            if child is hub or child.get('locationID') != want_loc:
+                continue
+            if 'idVendor' not in child:
+                continue
+            for sub in walk(child):
+                dev = sub.get('IOCalloutDevice')
+                if dev:
+                    print(dev)
+                    sys.exit(0)
 sys.exit(1)
 PYEOF
 }
