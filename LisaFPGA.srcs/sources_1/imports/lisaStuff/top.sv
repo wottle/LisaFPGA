@@ -301,11 +301,26 @@ module top(
     assign _INT2 = 1'b1;
 
     logic DOTCK;
-    logic sysclk_ibuf;
+    logic sysclk_ibuf;    // raw IBUF output -- MMCM reference inputs ONLY, never a fabric clock
+    logic sysclk_fabric;  // BUFG'd copy -- for logic clocked directly off sysclk
 
     IBUF sysclk_ibuf_buffer (
         .I(sysclk),
         .O(sysclk_ibuf)
+    );
+
+    // sysclk_ibuf goes straight to four MMCM reference inputs, which is fine on a dedicated route
+    // (see the CLOCK_DEDICATED_ROUTE note in the XDC). But it must NOT clock fabric registers: with
+    // no BUFG the net runs on general routing, and its insertion delay then depends on placement.
+    // settings_flash alone puts ~250 registers on it, and on a build where they landed far apart the
+    // clock arrived 3.796ns at one end and 7.646ns at the other -- 3.7ns of skew against 0.7ns of
+    // data delay, which is 58 hold violations at WHS -3.211ns on same-clock, zero-logic-level paths.
+    // It only ever passed before by luck: the DEBUG_FLASH_ILA builds needed a real clock buffer for
+    // the debug core, so Vivado inserted a BUFG and everything downstream inherited a low-skew clock.
+    // Turning the ILA off removed the buffer and exposed it.
+    BUFG sysclk_fabric_bufg (
+        .I(sysclk_ibuf),
+        .O(sysclk_fabric)
     );
 
     logic COPCK;
@@ -567,7 +582,7 @@ module top(
     logic settings_loaded = 1'b0;   // latched level: "the load has finished, data is stable"
     logic settings_load_req = 1'b1; // one-shot request, cleared once the load starts
 
-    always_ff @(posedge sysclk_ibuf) begin
+    always_ff @(posedge sysclk_fabric) begin
         if (settings_busy) settings_load_req <= 1'b0;
         if (settings_load_done) settings_loaded <= 1'b1;
     end
@@ -583,7 +598,7 @@ module top(
     logic do_save_pulse = 1'b0;
     logic saving = 1'b0, saw_busy = 1'b0, settings_save_done = 1'b0;
 
-    always_ff @(posedge sysclk_ibuf) begin
+    always_ff @(posedge sysclk_fabric) begin
         save_req_int  <= settings_save_req;
         save_req_sync <= save_req_int;
         save_req_sync_q <= save_req_sync;
@@ -612,7 +627,7 @@ module top(
     settings_flash #(
         .DEBUG_ILA(DEBUG_FLASH_ILA)
     ) settings_store (
-        .clk(sysclk_ibuf),
+        .clk(sysclk_fabric),
         .rst(1'b0),
         .do_load(settings_load_req),
         .do_save(do_save_pulse),
@@ -1381,7 +1396,7 @@ module top(
         ._PWRSW(_PWRSW_falling),
         .ON(ON),
 
-        .sysclk(sysclk_ibuf),
+        .sysclk(sysclk_fabric),
         .C16M(C16M),
         .COPCK_2x(COPCK_2x),
         .COPCK(COPCK),

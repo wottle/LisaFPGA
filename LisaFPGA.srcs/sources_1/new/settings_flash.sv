@@ -164,12 +164,14 @@ module settings_flash #(
     end
 
     // --- checksum over what we read back ------------------------------------------------------
+    // Accumulated one byte at a time as the bytes arrive, NOT summed combinationally at the end.
+    // The obvious version -- a 14-term adder over blk[] evaluated in S_LD_CHECK -- is a 16-logic-level,
+    // 7-carry-chain path from blk_reg to load_valid_reg, and it does not make 8ns: it measured 8.182ns
+    // (WNS -0.232) once sysclk_fabric gave this domain a clean low-skew clock. Previously the huge
+    // unbuffered-clock skew happened to mask it. Bytes arrive 64 clocks apart, so one 8-bit add per
+    // byte is free and the long chain disappears entirely.
     logic [127:0] blk;
     logic [15:0]  csum_rx;
-    always_comb begin
-        csum_rx = 16'd0;
-        for (int i = 0; i < 14; i++) csum_rx = csum_rx + 16'(blk[i*8 +: 8]);
-    end
 
     // --- command sequencer ---------------------------------------------------------------------
     typedef enum logic [4:0] {
@@ -247,9 +249,11 @@ module settings_flash #(
                 S_LD_A2b: if (xfer_done) begin tx_byte <= SETTINGS_ADDR[23:16]; xfer_start <= 1'b1; state <= S_LD_A2; end
                 S_LD_A2:  if (xfer_done) begin tx_byte <= SETTINGS_ADDR[15:8];  xfer_start <= 1'b1; state <= S_LD_A1; end
                 S_LD_A1:  if (xfer_done) begin tx_byte <= SETTINGS_ADDR[7:0];   xfer_start <= 1'b1; state <= S_LD_A0; end
-                S_LD_A0:  if (xfer_done) begin byte_idx <= 5'd0; tx_byte <= 8'h00; xfer_start <= 1'b1; state <= S_LD_DATA; end
+                S_LD_A0:  if (xfer_done) begin byte_idx <= 5'd0; csum_rx <= 16'd0; tx_byte <= 8'h00; xfer_start <= 1'b1; state <= S_LD_DATA; end
                 S_LD_DATA: if (xfer_done) begin
                     blk[byte_idx[3:0]*8 +: 8] <= rx_byte;
+                    // Bytes 0..13 are magic + payload; 14..15 are the stored checksum itself
+                    if (byte_idx < 5'd14) csum_rx <= csum_rx + 16'(rx_byte);
                     if (byte_idx == 5'd15) begin
                         flash_cs_n <= 1'b1; state <= S_LD_CHECK;
                     end else begin

@@ -1132,6 +1132,13 @@ module HDMI_Interface #(
     logic [10:0] mdy;
     logic [2:0] m_row;
     logic [3:0] m_vid;
+    // Registered copy, used for the value-string ROM lookup. m_vid depends ONLY on m_row, which comes
+    // from mdy and is therefore constant for a whole scan line -- so delaying it by one pixel clock is
+    // visually free: it settles one pixel into the line, and the menu box does not start until x=320
+    // (1024x768) or x=768 (1080p). What it buys is breaking the
+    //   video_mode -> m_vid -> value_rom -> m_glyph -> font_rom -> menu_pixel
+    // chain, which is 12 logic levels and was marginal at 1080p60's 6.737ns (WNS -0.019).
+    logic [3:0] m_vid_q;
     logic [4:0] m_col;
     logic [5:0] m_glyph;
     logic [3:0] hex_nib;
@@ -1168,10 +1175,11 @@ module HDMI_Interface #(
             else if (hex_nib < 4'd10) m_glyph = 6'(hex_nib);              // 0-9
             else m_glyph = 6'd12 + 6'(hex_nib) - 6'd10;                   // A-F
         end else begin
-            m_glyph = value_rom[{m_vid, m_col[2:0]}];
+            m_glyph = value_rom[{m_vid_q, m_col[2:0]}];
         end
     end
     always_ff @(posedge clk_pixel) begin
+        m_vid_q <= m_vid;
         menu_on <= ALIGNMENT_TUNING_MODE && menu_active &&
                    (cx5 >= menu_x) && (cx5 < menu_x + MENU_W) &&
                    (cy5 >= menu_y) && (cy5 < menu_y + MENU_H);

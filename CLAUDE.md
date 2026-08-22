@@ -132,6 +132,20 @@ run anyway, so the build "succeeded" while doing the wrong thing.
   builds, whose 5x clocks are 325MHz (1024x768) and 371MHz (1080p30), both well inside spec. When judging a
   1080p60 build, check that setup (WNS) and hold (WHS) are clean and that the only failures are these
   pulse-width entries.
+- **`sysclk_ibuf` is an IBUF output and must NEVER clock fabric registers** (fixed 2026-08-17). It feeds
+  four MMCM reference inputs, which is legitimate on a dedicated route, but with no BUFG the net runs on
+  general routing and its insertion delay depends on placement. `settings_flash` alone puts ~250 registers
+  on it (fanout was 281), and on the first build with `DEBUG_FLASH_ILA` turned back off the clock arrived
+  3.796ns at one end and 7.646ns at the other: **3.735ns of skew against 0.673ns of data delay, giving 58
+  hold violations at WHS -3.211ns** on same-clock, zero-logic-level paths. Setup was fine (WNS +0.029) —
+  hold is what breaks, and hold failures are fatal regardless of clock speed.
+  It had passed every previous build purely by luck: the ILA needs a real clock buffer, so Vivado inserted
+  a BUFG on that net and every register downstream inherited a low-skew clock. **Turning the debug core
+  off is what exposed it**, which is a nasty ordering — the "clean up for production" step is the one that
+  broke timing. Fix: `sysclk_fabric`, a BUFG'd copy, now clocks everything in the fabric
+  (`settings_flash`, the two save/load handshake blocks in `top.sv`, and `IO_board`); `sysclk_ibuf` goes
+  only to MMCM reference inputs. Check WHS, not just WNS, on any build where a debug core is added or
+  removed.
 - To iterate faster when RTL *has* changed, `STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY none` (skips the
   phase that eats the hour) and `.DIRECTIVE RuntimeOptimized` help a lot; turn both off for a final build.
 

@@ -97,7 +97,6 @@ proc step_failed { step } {
 OPTRACE "impl_1" END { }
 }
 
-set_msg_config -id {Common 17-41} -limit 10000000
 
 OPTRACE "impl_1" START { ROLLUP_1 }
 OPTRACE "Phase: Init Design" START { ROLLUP_AUTO }
@@ -105,10 +104,8 @@ start_step init_design
 set ACTIVE_STEP init_design
 set rc [catch {
   create_msg_db init_design.pb
-  set_param tcl.collectionResultDisplayLimit 0
   set_param general.usePosixSpawnForFork 1
   set_param chipscope.maxJobs 3
-  set_param xicom.use_bs_reader 1
   set_param runs.launchOptions { -jobs 8  }
 OPTRACE "create in-memory project" START { }
   create_project -in_memory -part xc7a100tcsg324-2
@@ -128,7 +125,7 @@ OPTRACE "add files" START { }
   read_ip -quiet C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.srcs/sources_1/ip/hdmi_clock_divider/hdmi_clock_divider.xci
   read_ip -quiet C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.srcs/sources_1/ip/dotck_mmcm/dotck_mmcm.xci
   read_ip -quiet C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.srcs/sources_1/ip/clock_divider/clock_divider.xci
-  read_ip -quiet c:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.srcs/sources_1/ip/settings_ila_1/settings_ila.xci
+  read_ip -quiet C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.srcs/sources_1/ip/settings_ila_1/settings_ila.xci
 OPTRACE "read constraints: implementation" START { }
   read_xdc C:/Users/wottle/Documents/Development/LisaFPGA/LisaFPGA.srcs/constrs_1/imports/lisaStuff/LisaFPGA.xdc
 OPTRACE "read constraints: implementation" END { }
