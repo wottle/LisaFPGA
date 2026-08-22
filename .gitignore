@@ -37,6 +37,9 @@ LisaFPGA.runs/impl_1/top*.dcp
 LisaFPGA.runs/impl_1/*.rpt
 LisaFPGA.runs/impl_1/*.rpx
 LisaFPGA.runs/impl_1/*.vdi
+# Timing-analysis byproduct. Named specifically rather than impl_1/*.txt, because clockInfo.txt
+# and htr.txt in the same directory ARE tracked.
+LisaFPGA.runs/impl_1/tight_setup_hold_pins.txt
 
 # ILA capture exports from the settings-flash debugging (findings are written up in CLAUDE.md)
 ila_*.csv
