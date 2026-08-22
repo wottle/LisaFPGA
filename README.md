@@ -419,6 +419,8 @@ Feel free to email me at [alexelectronicsguy@gmail.com](mailto:alexelectronicsgu
 
 8/19/2026 - Fixed program_board.sh USB enumeration to work on latest macOS version (Tahoe). Also hopefully fixed a bug where cmake can't find the build directory when building openFPGALoader from source by just creating the directory manually; it seems that cmake automatically makes the directory under some Linux distros but not others.
 
+8/22/2026 - LisaFPGA core v1.6 - Fixed a bug where the Lite Adapter PWM signal (for Sony drives) would be incorrectly sent to the lower Twiggy drive in place of its MT1 signal. Now we switch between sending PWM and sending MT1 depending on which I/O ROM is selected.
+
 # Appendix - Jumpers, Switches, Buttons, and LEDs
 There are quite a lot of switches, jumpers, buttons, and LEDs on the LisaFPGA board. Here's a table explaining what each one does, along with longer explanations whenever necessary.
 
