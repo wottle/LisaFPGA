@@ -508,21 +508,28 @@ module HDMI_Interface #(
     logic tuning_init_done = 1'b0;
     logic settings_valid_q = 1'b0;  // latched copy of settings_valid for the menu readout
 
-    // Everything stays dormant until summoned: hold OK for ~5 seconds to open the on-screen menu. Until then the
-    // buttons do nothing here (they still pass through to the ESP32 as always) and nothing is drawn, so the board
-    // behaves exactly like a stock build. Counting frames avoids a separate timer, but the frame rate varies by
-    // mode, so the target does too: 60Hz for 1024x768 and 1080p60, 30Hz for the 1080p30 position.
-    //   OK held ~5s   : open / close the menu
-    //   OK short press: activate the highlighted menu item, or (menu closed, adjust on) cycle axis and step size
-    //   LEFT / RIGHT  : move the menu highlight, or (menu closed, adjust on) move the image
+    // Everything stays dormant until summoned: hold LEFT+RIGHT together for ~3 seconds to open the on-screen
+    // menu. Holding OK alone used to be the summon gesture, but ESFloppy's own firmware treats a held SEL (the
+    // same physical button as OK) as its own long-press -- a force-eject on its status screen, or a screen-pop
+    // in its file picker -- and that fires before our longer hold completes, since the buttons are wired to both
+    // the FPGA and the ESP32 in parallel. LEFT+RIGHT has no hold-duration meaning anywhere in ESFloppy's
+    // firmware (checked its source: LEFT/RIGHT are only ever read as single-frame "move selection" edges), so
+    // holding both together is silent to it. Until summoned, the buttons do nothing here (they still pass
+    // through to the ESP32 as always) and nothing is drawn, so the board behaves exactly like a stock build.
+    // Counting frames avoids a separate timer, but the frame rate varies by mode, so the target does too: 60Hz
+    // for 1024x768 and 1080p60, 30Hz for the 1080p30 position.
+    //   LEFT+RIGHT held ~3s : open / close the menu
+    //   OK short press      : activate the highlighted menu item, or (menu closed, adjust on) cycle axis and step size
+    //   LEFT / RIGHT        : move the menu highlight, or (menu closed, adjust on) move the image
     logic tuning_active = 1'b0;    // "ADJUST IMAGE" -- readout visible and LEFT/RIGHT move the picture
     logic menu_active = 1'b0;
     logic [2:0] menu_sel = 3'd0;
-    logic ok_long_fired = 1'b0;    // Set once the long press fires, so holding on doesn't toggle repeatedly
-    logic [8:0] ok_frames = 9'd0;
-    logic ok_pressed, prev_left, prev_right;
+    logic summon_long_fired = 1'b0; // Set once the long press fires, so holding on doesn't toggle repeatedly
+    logic [8:0] summon_frames = 9'd0;
+    logic ok_pressed, summon_pressed, prev_left, prev_right, prev_ok;
     logic [8:0] long_press_target;
-    assign ok_pressed = (btn_sync[1] == 1'b0); // Buttons are active low
+    assign ok_pressed     = (btn_sync[1] == 1'b0); // Buttons are active low
+    assign summon_pressed = (btn_sync[2] == 1'b0) && (btn_sync[0] == 1'b0); // LEFT and RIGHT held together
     assign long_press_target = (video_mode == 2'd0) ? 9'd90 : 9'd180; // ~3s: 1080p30 is 30Hz, the other two are 60Hz
 
     // Runtime overrides for things that are otherwise jumper-only. Each is a toggle XORed onto the real input,
@@ -648,70 +655,78 @@ module HDMI_Interface #(
             end else begin
                 prev_left  <= btn_sync[2];
                 prev_right <= btn_sync[0];
+                prev_ok    <= ok_pressed;
 
-                // OK: long hold toggles the menu, short press acts on release (so a long hold doesn't also
-                // fire the short-press action on its way past)
-                if (ok_pressed) begin
-                    if (!ok_long_fired) begin
-                        if (ok_frames >= long_press_target) begin
+                // LEFT+RIGHT: long hold toggles the menu. Tracked independently of OK below, so this chord
+                // never also fires OK's short-press action, and OK's press/release never affects this timer.
+                if (summon_pressed) begin
+                    if (!summon_long_fired) begin
+                        if (summon_frames >= long_press_target) begin
                             menu_active <= ~menu_active;
                             menu_sel <= 3'd0;
-                            ok_long_fired <= 1'b1; // Wait for a release before this can fire again
+                            summon_long_fired <= 1'b1; // Wait for a release before this can fire again
                         end else begin
-                            ok_frames <= ok_frames + 1'b1;
+                            summon_frames <= summon_frames + 1'b1;
                         end
                     end
                 end else begin
-                    if (ok_frames != 9'd0 && !ok_long_fired) begin
-                        if (menu_active) begin
-                            // Activate the highlighted item
-                            case (menu_sel)
-                                // RESOLUTION: cycle 1080p30 -> 1080p60 -> 1024x768 -> back. Mode 2 is skipped
-                                // when OUTPUT_1024X768 is clear, since that build has no 1024x768 clock.
-                                3'd0: begin
-                                    mode_user_set <= 1'b1;
-                                    if (video_mode == 2'd0)      video_mode <= 2'd1;
-                                    else if (video_mode == 2'd1) video_mode <= OUTPUT_1024X768 ? 2'd2 : 2'd0;
-                                    else                         video_mode <= 2'd0;
-                                end
-                                3'd1: tuning_active <= ~tuning_active;                     // ADJUST IMAGE
-                                3'd2: scanlines_override <= ~scanlines_override;           // SCANLINES
-                                3'd3: contrast_override_menu <= ~contrast_override_menu;   // MAX CONTRAST
-                                3'd4: begin
-                                    // SETTINGS: snapshot the current values and ask the sysclk side to write
-                                    // them. Latching here rather than driving the bus straight from the live
-                                    // registers keeps it stable for the whole erase+program, which takes
-                                    // milliseconds -- far longer than a button press.
-                                    settings_save_data <= {
-                                        {11'b0, 1'b1, video_mode, contrast_override_menu, scanlines_override},
-                                        {5'b0, v_offset_1024},
-                                        {5'b0, h_offset_1024},
-                                        {5'b0, v_offset_1080p},
-                                        {5'b0, h_offset_1080p}
-                                    };
-                                    settings_save_req <= 1'b1;
-                                    save_disp_cnt     <= 6'd30;  // ~0.5s at 60Hz, ~1s at 30Hz
-                                end
-                                default: menu_active <= 1'b0;                              // EXIT
-                            endcase
-                        end else if (tuning_active) begin
-                            // Menu closed and the adjust tool up: cycle axis then step size
-                            {axis_y, coarse_step} <= {axis_y, coarse_step} + 2'd1;
-                        end
+                    summon_frames <= 9'd0;
+                    summon_long_fired <= 1'b0;
+                end
+
+                // OK: acts on release. No longer tracks a long hold of its own -- now that summon lives on
+                // LEFT+RIGHT, every OK press is just a short press.
+                if (!ok_pressed && prev_ok) begin
+                    if (menu_active) begin
+                        // Activate the highlighted item
+                        case (menu_sel)
+                            // RESOLUTION: cycle 1080p30 -> 1080p60 -> 1024x768 -> back. Mode 2 is skipped
+                            // when OUTPUT_1024X768 is clear, since that build has no 1024x768 clock.
+                            3'd0: begin
+                                mode_user_set <= 1'b1;
+                                if (video_mode == 2'd0)      video_mode <= 2'd1;
+                                else if (video_mode == 2'd1) video_mode <= OUTPUT_1024X768 ? 2'd2 : 2'd0;
+                                else                         video_mode <= 2'd0;
+                            end
+                            3'd1: tuning_active <= ~tuning_active;                     // ADJUST IMAGE
+                            3'd2: scanlines_override <= ~scanlines_override;           // SCANLINES
+                            3'd3: contrast_override_menu <= ~contrast_override_menu;   // MAX CONTRAST
+                            3'd4: begin
+                                // SETTINGS: snapshot the current values and ask the sysclk side to write
+                                // them. Latching here rather than driving the bus straight from the live
+                                // registers keeps it stable for the whole erase+program, which takes
+                                // milliseconds -- far longer than a button press.
+                                settings_save_data <= {
+                                    {11'b0, 1'b1, video_mode, contrast_override_menu, scanlines_override},
+                                    {5'b0, v_offset_1024},
+                                    {5'b0, h_offset_1024},
+                                    {5'b0, v_offset_1080p},
+                                    {5'b0, h_offset_1080p}
+                                };
+                                settings_save_req <= 1'b1;
+                                save_disp_cnt     <= 6'd30;  // ~0.5s at 60Hz, ~1s at 30Hz
+                            end
+                            default: menu_active <= 1'b0;                              // EXIT
+                        endcase
+                    end else if (tuning_active) begin
+                        // Menu closed and the adjust tool up: cycle axis then step size
+                        {axis_y, coarse_step} <= {axis_y, coarse_step} + 2'd1;
                     end
-                    ok_frames <= 9'd0;
-                    ok_long_fired <= 1'b0;
                 end
 
                 if (menu_active) begin
-                    // LEFT/RIGHT move the highlight, on press edges only so the list doesn't race past
-                    if (btn_sync[2] == 1'b0 && prev_left == 1'b1) begin
+                    // LEFT/RIGHT move the highlight, on press edges only so the list doesn't race past.
+                    // Suppressed while the LEFT+RIGHT summon chord is down, so starting or releasing that
+                    // hold doesn't also nudge the highlight.
+                    if (!summon_pressed && btn_sync[2] == 1'b0 && prev_left == 1'b1) begin
                         menu_sel <= (menu_sel == 3'd0) ? 3'd5 : menu_sel - 1'b1;
-                    end else if (btn_sync[0] == 1'b0 && prev_right == 1'b1) begin
+                    end else if (!summon_pressed && btn_sync[0] == 1'b0 && prev_right == 1'b1) begin
                         menu_sel <= (menu_sel == 3'd5) ? 3'd0 : menu_sel + 1'b1;
                     end
-                end else if (tuning_active) begin
-                    // Write the (possibly unchanged) value back to whichever register is selected
+                end else if (tuning_active && !summon_pressed) begin
+                    // Write the (possibly unchanged) value back to whichever register is selected.
+                    // Gated on !summon_pressed so holding LEFT+RIGHT to summon the menu can't also walk
+                    // the image to one edge over the course of the hold.
                     if (axis_y) begin
                         if (in_1024_mode) v_offset_1024  <= next_value;
                         else              v_offset_1080p <= next_value;

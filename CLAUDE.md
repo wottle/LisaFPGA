@@ -1,5 +1,52 @@
 # LisaFPGA — Project Notes for Claude
 
+## Recently completed: merged upstream (ESFloppy release) into feature/settings-flash-persistence,
+## moved the on-screen menu's summon gesture off OK
+
+**Branch:** `feature/settings-flash-persistence`, now merged with `main` (merge commit `6421dff`).
+
+**Why the merge:** upstream (`alexthecat123/LisaFPGA`) shipped real ESFloppy firmware on 2026-08-18
+(`1ddf2ad`), plus two commits after it. Our fork's `main` was already byte-identical to upstream `main` at
+merge time, so this was really "pull the feature branch forward," not a cross-fork reconciliation. All
+conflicts were confined to `LisaFPGA.runs/impl_1/*` — tracked Vivado build output (bitstream, P&R reports,
+backup `.vdi` files) that both branches had independently regenerated. Resolved by keeping the feature
+branch's own last-built artifacts (`git checkout --ours`); they'll be overwritten by the next real build
+regardless. Zero conflicts in any actual source file (`top.sv`, `HDMI_Interface.sv`, `README.md` all merged
+clean).
+
+**Why the button-logic change:** ESFloppy's new firmware treats a held SEL button (the same physical button
+wired to our `OK` input) as its own long-press gesture — `LONG_PRESS_DURATION = 1000ms` in its `uiState.h`
+triggers a force-eject on its status screen (`ui.cpp`) or a screen-pop in its file picker
+(`uiFilePicker.cpp`). Since our on-screen menu's summon gesture was "hold OK ~3s," and the buttons are wired
+to both the FPGA and the ESFloppy ESP32 in parallel, every attempt to open our menu fired ESFloppy's 1-second
+long-press first — an unwanted eject, every time.
+
+**Fix (in `HDMI_Interface.sv`):** moved the summon gesture from "hold OK ~3s" to "hold LEFT+RIGHT together
+~3s". Verified against ESFloppy's actual firmware source (cloned `alexthecat123/ESFloppy`) that LEFT and
+RIGHT have **no hold-duration logic anywhere** — `ui.cpp`, `uiFilePicker.cpp`, `uiSettingsMenu.cpp` all read
+them only as single-frame "move selection" press edges, so holding both together produces one harmless,
+self-canceling nudge on ESFloppy's screen and nothing escalating. This is the one gesture on the 3-button pad
+that's provably silent to ESFloppy.
+
+Implementation split what used to be one `ok_pressed`-driven state machine into two independent ones:
+- `summon_pressed` (`LEFT && RIGHT`, both active-low) drives a renamed `summon_frames`/`summon_long_fired`
+  counter that toggles `menu_active` — structurally identical to the old `ok_frames`/`ok_long_fired` logic,
+  just keyed off the chord instead of OK.
+- OK's short-press action (activate menu item / cycle tuning axis) is now a plain release-edge detector
+  (`!ok_pressed && prev_ok`), since OK no longer needs to distinguish short vs. long presses — every OK press
+  is short now that it's not doing summon duty.
+- Added `!summon_pressed` guards on the in-menu LEFT/RIGHT highlight-move block and the `tuning_active`
+  offset write-back, so starting/ending the summon hold can't also nudge the menu highlight or (more
+  importantly) walk the image to one edge over the 3-second hold if a user happens to be mid-adjustment when
+  they summon the menu.
+
+**NOT tested on hardware.** No Vivado/verilator/iverilog available in this environment (same constraint as
+every prior session on this file) — this is a source-level change only, verified by careful reading and
+structural comparison against the working `ok_pressed` logic it replaces, not by synthesis or a board. Next
+step when hardware is available: build, flash, and confirm (a) LEFT+RIGHT hold opens/closes the menu, (b) a
+disk in ESFloppy survives opening the menu without ejecting, (c) OK still activates menu items and cycles the
+tuning axis/step, (d) tuning-mode LEFT/RIGHT image movement still works normally when summon isn't held.
+
 ## Current work: HDMI output modes — 1080p30 / 1080p60 / 1024x768, runtime selectable
 
 **Branch:** `feature/1024x768-hdmi-output` (created off `main`, not yet merged or pushed). Commit `6dbe125`
