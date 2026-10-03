@@ -13,7 +13,7 @@
 // 
 // Dependencies: 
 // 
-// Revision: 1.4 - Added the ability to force the contrast to be maxed out all the time with GPIO[1], at the request of Adrian Black
+// Revision: 1.6 - Fixed an issue where the Lite Adapter PWM signal would incorrectly be sent to the lower Twiggy drive in place of MT1
 // Additional Comments:
 // 
 //////////////////////////////////////////////////////////////////////////////////
@@ -883,7 +883,7 @@ module top(
     // This depends on the FLOPPY_SRC signal, so we need to mux between them
 
     // First generate the Sony drive's PWM motor control signal
-    // It's derived from MT0, but processed through the Lite Adapter
+    // It's derived from MT1, but processed through the Lite Adapter
     // So let's make a Lite adapter to generate it
     logic PWM;
 
@@ -915,7 +915,16 @@ module top(
             MT0_EXTFLOPPY = MT0;
             _DR1_EXTFLOPPY = _DR1;
             _DR0_EXTFLOPPY = _DR0;
-            PWM_EXTFLOPPY = PWM;
+            // The PWM_EXTFLOPPY signal carries PWM for Sony drives, but is just a copy of MT1 for Twiggy drives
+            // I know there's a MT1_EXTFLOPPY signal too, but it doesn't actually go anywhere on the board thanks to how the connector is set up
+            // So we need to mux PWM and MT1 into the PWM_EXTFLOPPY depending on IO_ROM_SEL
+            if (IO_ROM_SEL) begin
+                // Send MT1 through in Twiggy mode
+                PWM_EXTFLOPPY = MT1;
+            end else begin
+                // And send PWM from the Lite Adapter through in Sony mode
+                PWM_EXTFLOPPY = PWM;
+            end
             // And make sure that the onboard ESFloppy signals are inactive
             WRD_ESFLOPPY = 1'b0;
             _WRQ_ESFLOPPY = 1'b1;
