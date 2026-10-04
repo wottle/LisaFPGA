@@ -40,12 +40,34 @@ Implementation split what used to be one `ok_pressed`-driven state machine into 
   importantly) walk the image to one edge over the 3-second hold if a user happens to be mid-adjustment when
   they summon the menu.
 
-**NOT tested on hardware.** No Vivado/verilator/iverilog available in this environment (same constraint as
+**Was untested when written** (superseded by the hardware test below). No Vivado/verilator/iverilog available in this environment (same constraint as
 every prior session on this file) — this is a source-level change only, verified by careful reading and
 structural comparison against the working `ok_pressed` logic it replaces, not by synthesis or a board. Next
 step when hardware is available: build, flash, and confirm (a) LEFT+RIGHT hold opens/closes the menu, (b) a
 disk in ESFloppy survives opening the menu without ejecting, (c) OK still activates menu items and cycles the
 tuning axis/step, (d) tuning-mode LEFT/RIGHT image movement still works normally when summon isn't held.
+
+**Hardware test (2026-10-03): PASSED, and now in flash.** Built at `5ef5c2a` (0 errors, WNS +0.253 / WHS +0.063,
+0 failing setup/hold endpoints, only the 10 known 1080p60 pulse-width entries), JTAG-programmed, then written
+to the config flash and confirmed by a cold boot from flash:
+
+| Test | Result |
+|---|---|
+| (a) LEFT+RIGHT hold opens the menu | **Pass** — volatile, and again after cold boot from flash |
+| (b) disk in ESFloppy survives the summon | **Not yet tested** — ESFloppy's OLED is out of action (see below), so there's no way to see whether a disk ejected |
+| (c) OK activates menu items / cycles tuning axis | **Pass** — OK was how ADJUST IMAGE got turned on |
+| (d) no drift while holding the chord in tuning mode | **Pass** |
+
+Cold boot also brought back the saved alignment, confirming the flash write's `use_file` range left the
+settings block at `0xC00000` alone. **(b) is the one this change exists for** — check it when the replacement
+display arrives.
+
+**Board state as of 2026-10-03.** The board's own USB-C uplink no longer enumerates at all: no FT232H, no
+CP2102N, no ESP32s, no CH334 hub, all four ACT LEDs dark, across two cables — while the board itself powers
+up, boots and drives video normally. Suspected cause is an overvoltage from a failed buck converter in the
+case damaging the FT232H or the 5V rail; the ESFloppy OLED is also out. **JTAG now goes through an external
+Digilent programmer on header J19**, which is also why `program_board.sh` can't be used right now: every step
+of it talks to the board through that dead USB-C hub and it dies before reaching the FPGA.
 
 ## Current work: HDMI output modes — 1080p30 / 1080p60 / 1024x768, runtime selectable
 
@@ -193,6 +215,28 @@ run anyway, so the build "succeeded" while doing the wrong thing.
   (`settings_flash`, the two save/load handshake blocks in `top.sv`, and `IO_board`); `sysclk_ibuf` goes
   only to MMCM reference inputs. Check WHS, not just WNS, on any build where a debug core is added or
   removed.
+- **Flash programming from Vivado fails at the default 15MHz JTAG clock. Use 3MHz.** (Found 2026-10-03.)
+  `program_hw_cfgmem` erased fine, then wrote ~1.48MB correctly before `Program/Verify Operation failed.
+  Byte 1551953 does not match (FF != 00)` — `[Labtools 27-3347] Flash Programming Unsuccessful`. **The
+  error text blames the flash part ("verify the selected flash part matches"), and that is a red herring**:
+  Vivado had just read the JEDEC ID itself (`ef 40 18`, correct for the W25Q128JV) and the erase had worked.
+  A write that succeeds for a megabyte and a half and then drops a byte is a marginal link, not a wrong part.
+  The same `27-3347` failure happened in August through the board's onboard FT232H, so it is not specific to
+  one programmer. Fix, before creating the cfgmem:
+  ```tcl
+  close_hw_target
+  set_property PARAM.FREQUENCY 3000000 [current_hw_target]
+  open_hw_target
+  ```
+  Then succeeded first time, in 2m41s. Closing the target invalidates `current_hw_device` and any existing
+  cfgmem handle, so reselect the device and recreate the cfgmem afterwards.
+  The correct part string for this board's **W25Q128JVSIQ** is **`w25q128jvq-spi-x1_x2_x4`** — the trailing
+  `Q` in the ordering code is Winbond's fixed-Quad-Enable variant, which Vivado lists as `jvq`. (`jvm` is the
+  DTR variant; `_x8` entries are for dual-parallel flash pairs.) Always set
+  `PROGRAM.ADDRESS_RANGE use_file`: it erases only the bitstream's sectors (`0x000000`-`0x3A607B`), which is
+  what keeps the saved settings block at `0xC00000` alive across a reflash — confirmed by cold boot.
+  **If a flash write fails, do not power-cycle**: the bitstream region is erased or partial and the board
+  will come up unconfigured. JTAG still works and a retry recovers it.
 - To iterate faster when RTL *has* changed, `STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY none` (skips the
   phase that eats the hour) and `.DIRECTIVE RuntimeOptimized` help a lot; turn both off for a final build.
 

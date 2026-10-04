@@ -106,7 +106,7 @@ set rc [catch {
   create_msg_db init_design.pb
   set_param general.usePosixSpawnForFork 1
   set_param chipscope.maxJobs 3
-  set_param runs.launchOptions { -jobs 8  }
+  set_param runs.launchOptions { -jobs 6  }
 OPTRACE "create in-memory project" START { }
   create_project -in_memory -part xc7a100tcsg324-2
   set_property design_mode GateLvl [current_fileset]
