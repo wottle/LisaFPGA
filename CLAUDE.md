@@ -62,12 +62,41 @@ Cold boot also brought back the saved alignment, confirming the flash write's `u
 settings block at `0xC00000` alone. **(b) is the one this change exists for** — check it when the replacement
 display arrives.
 
-**Board state as of 2026-10-03.** The board's own USB-C uplink no longer enumerates at all: no FT232H, no
-CP2102N, no ESP32s, no CH334 hub, all four ACT LEDs dark, across two cables — while the board itself powers
-up, boots and drives video normally. Suspected cause is an overvoltage from a failed buck converter in the
-case damaging the FT232H or the 5V rail; the ESFloppy OLED is also out. **JTAG now goes through an external
-Digilent programmer on header J19**, which is also why `program_board.sh` can't be used right now: every step
-of it talks to the board through that dead USB-C hub and it dies before reaching the FPGA.
+**Board repair (2026-10-04): USB-C uplink FIXED -- the fault was D5, the USB-C port's ESD clamp.** A failed buck
+converter in the case put an overvoltage on the 5V rail. Symptom: the board powered up, booted and drove video
+normally, but its USB-C uplink enumerated nothing at all -- no CH334F hub, no FT232H, no CP2102N, no ESP32s, all
+four ACT LEDs dark, and not even an "Unknown USB Device" in Device Manager. The ESFloppy OLED also died and is
+still out.
+
+Diagnosis, from the rev 3 netlist (`lisafpga_rev_3_easyeda_project.epro2` is EasyEDA Pro text; the PCB section
+records every pad's net in `PAD_NET` entries, which beats reading the schematic drawing):
+- **D5 is a USBLC6-2SC6** across the USB-C uplink: pins 1/6 `USBC_DP`, 3/4 `USBC_DN`, 5 `5V_USBC`, 2 `GND`. The
+  uplink D+/D- go straight to the **CH334F hub (U15)** pins 15/14.
+- `5V_USBC` (USB-C VBUS) is a separate net from the board's main `5V`; **SW1 is the power switch joining them**,
+  since USB-C is the board's only power input. SW1 was on during the event, so D5 took the overvoltage.
+- D9/D10 are the same part on the keyboard/mouse ports, with VBUS on the main rail. They survived, and those
+  ports still worked -- which argued D5 was not shorted.
+- **The decisive measurement: DC volts on D+ (D5 pin 1) with the board powered and connected to the PC.** A live
+  hub pulls D+ up through 1.5k against the host's 15k pull-down, giving ~3V; a dead hub gives ~0V. It read
+  **0.8V** -- so the hub WAS alive, but something was dragging D+ down to roughly 500 ohms to ground, below the
+  ~2V the host needs to detect an attach. That is why Windows saw nothing at all rather than a failed enumeration.
+- With SW1 off, D5's VBUS net held only D5 and two 100nF caps, yet read 30k to ground where a healthy clamp
+  reads open -- the overstressed clamp had gone leaky on both sides.
+- **Removing D5 brought every device back immediately; a replacement USBLC6-2SC6 (marking `UL26`) was then fitted.**
+  Confirmed afterwards: hub, FT232H (EEPROM identity intact, serial `000000` matching `ft232h_eeprom.bin`), both
+  ESP32-S3s and the CP2102N all enumerate. Vivado then found the onboard FT232H as JTAG target
+  `xilinx_tcf/Xilinx/000000` and the FPGA behind it, so the board's own JTAG path is fully back and
+  `program_board.sh` is usable again. The CP2102N shows Device Manager problem code 28 on the Windows
+  machine, which is only a missing Silicon Labs CP210x driver -- it reports its custom "LisaFPGA Serial B" string,
+  so the chip and its EEPROM are fine.
+
+**Lesson for any future "board runs but USB is dead":** measure D+ before replacing anything. ~0V = hub dead or
+unpowered, ~3V = hub fine and the problem is elsewhere, anything in between = something leaking on the line.
+And remove a suspect protection part *before* fitting its replacement -- testing with it absent is unambiguous,
+whereas a straight swap that still fails can't tell a bad new part from a wrong diagnosis.
+
+While the uplink was down, the 2026-10-03 hardware test above went through an external Digilent programmer on
+header J19, which Vivado recognises natively; it remains a good fallback.
 
 ## Current work: HDMI output modes — 1080p30 / 1080p60 / 1024x768, runtime selectable
 
