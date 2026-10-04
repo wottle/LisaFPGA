@@ -662,6 +662,75 @@ LGPL, which matters for how LisaFPGA itself is distributed.
 **Suggested first step if resumed:** bring up a host core + soft CPU and try enumerating a *directly attached
 full-speed* keyboard before touching hub support. That validates the no-series-resistor signal integrity question on
 the real board cheaply, and tells you early whether the physical layer is going to fight you.
+### IN PROGRESS: USB full-speed feasibility spike (2026-08-22)
+
+**Note the section above is now historical background, not the current state.** The spike described as
+its "suggested first step" has been implemented and is waiting on a hardware run.
+
+**A correction worth stating plainly, because it was the premise of the whole question:**
+`nand2mario/usb_hid_host` is not a core we could adopt to fix this — **it is already the core LisaFPGA
+uses**. It is the limitation, not the remedy.
+
+**What made the spike far cheaper than the soft-CPU project.** Low-speed and full-speed USB are
+protocol-identical: same NRZI, bit stuffing, SYNC and SE0 EOP. They differ in rate and in **idle
+polarity** — full-speed idle (J) is D+ high, low-speed is D- high. And this core decodes NRZI from its
+internal `dmi` *alone*, not differentially, i.e. `dmi` is "the line that idles high". So the entire
+polarity difference collapses to **swapping D+/D- at the two pin boundaries** — where inputs are
+sampled, and where `up`/`um` drive the outputs. Everything between is untouched. Marked in the source
+as SWAP POINT 1 of 2 and 2 of 2.
+
+**Speed is set purely by the clock**, because the core samples 8x per bit: 12MHz/8 = 1.5Mbps,
+96MHz/8 = 12Mbps.
+
+**Clocking — the arithmetic was done up front, per the 1024x768 lesson.** `clock_divider` cannot
+produce 96MHz: its VCO is 626.5625MHz and 96MHz needs a divide of 6.527. A dedicated MMCM can, exactly:
+`CLKFBOUT_MULT_F 36.000, DIVCLK_DIVIDE 5` gives VCO 900MHz, and the **fractional** output divide
+`CLKOUT0_DIVIDE_F 9.375` gives **96.0000MHz = 12.0000Mbps, +0.0000%** (confirmed on the generated IP).
+The fractional divider is the key: an analysis considering only integer output dividers concludes
+exact 96MHz is unreachable from 125MHz and settles for -0.0186%, which is wrong and needlessly spends
+a third of the error budget. That matters because **full-speed hosts must hold 12Mbps to +/-0.05%**,
+where low speed allowed +/-1.5% and forgave everything. `add_usb_fs_clock.tcl` computes the achieved
+figure from the MMCM dividers and **fails loudly if it is out of spec**, rather than leaving it as a
+manual check the way `add_1024x768_clocks.tcl` did.
+
+**Build constants in `top.sv`:** `USB_FULL_SPEED` (default 0) and `DEBUG_USB_ILA` (default 0). The
+clock is selected in a *generate*, not a BUFGMUX, so a `USB_FULL_SPEED = 0` build instantiates no
+extra MMCM and no extra BUFG and is identical to stock — which matters, because BUFGCTRL is at 29/32.
+
+**Both ports share one usbclk**, so a full-speed build runs BOTH ports at full speed and low-speed
+keyboards/mice will NOT work in it. Fine for a test build; keep the constant at 0 for real use.
+Supporting both at once means clock-enable dividing off the 96MHz clock — a later refinement.
+
+**A `dbg_usb` output was added** exposing `{connected, state[3:0], pc[13:0]}`. `pc` is the microprogram
+counter into `usb_hid_host_rom`, so it distinguishes "it did not work" from "it stalls at instruction
+N" — the same reasoning behind `dbg_word` in `settings_flash`.
+
+**Declaration-order cleanup:** `dpi`, `dmi`, `ukprdyd` and `nakd` were moved to the top of `ukp`. They
+were used far above their original declarations, which Vivado synthesis tolerates with a warning but
+**xvlog rejects outright** — meaning the file could not be syntax-checked without an 85-minute
+synthesis run. `xvlog` ships with Vivado at `Vivado/bin/xvlog.bat` and now parses both changed files
+cleanly. **Use it as a pre-build check**; it costs seconds and this project's build cycle does not.
+
+**What the capture will tell us** (`tools/vivado_scripts/capture_usb_ila.tcl`):
+- **Idle polarity, first.** With a device attached and the bus idle, `dp_in=1 / dm_in=0` means it
+  attached as full speed; the reverse means low speed. That single reading says whether the device is
+  even offering the speed being tested.
+- **Edge quality.** D+/D- go straight to FPGA pins with **no series resistors** (full speed normally
+  wants ~22-33 ohm against the cable's ~90 ohm differential impedance). Ringing or inconsistent
+  sampling at the 8x points means the board needs bodge resistors — a cheap fix, and a decisive
+  finding for any future rev 4.
+- **How far enumeration gets**, from `pc` and `conerr`.
+
+**Deliberately NO PULLTYPE on the USB pins.** The board has the 15k pulldowns the spec requires, and
+the *device's* pull-up on D+ (full speed) or D- (low speed) is what declares its speed. An FPGA
+pull-up on either line would look like a device attaching and break speed detection. The
+settings-flash episode ended with "always pull up a floating input" — **that lesson does not transfer
+here.**
+
+**This is not expected to make Apple keyboards work.** They need hub enumeration, which this core has
+none of. The spike exists to settle the physical-layer question before committing to the soft-CPU
+project — and to find out cheaply if the board itself rules it out.
+
 
 ### Parked: a second display, a 1920x1280 3:2 panel (10.5", HDMI driver board)
 

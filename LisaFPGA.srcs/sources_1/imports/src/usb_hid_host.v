@@ -9,8 +9,19 @@
 // See https://github.com/nand2mario/usb_hid_host
 // 
 
-module usb_hid_host (
-    input  usbclk,		            // 12MHz clock
+module usb_hid_host #(
+    // 0 = low-speed (1.5Mbps, usbclk 12MHz)  --  the stock behaviour, unchanged.
+    // 1 = full-speed (12Mbps, usbclk ~96MHz).
+    //
+    // LS and FS are protocol-identical: same NRZI, bit stuffing, SYNC and SE0 EOP. They differ in
+    // rate and in IDLE POLARITY -- full-speed idle (J) is D+ high, low-speed idle is D- high.
+    // This core decodes NRZI from its internal dmi alone (not differentially), i.e. dmi is "the
+    // line that idles high". So the entire polarity difference collapses to swapping D+/D- at the
+    // two pin boundaries: where the inputs are sampled, and where up/um drive the outputs.
+    // Everything in between is untouched.
+    parameter FULL_SPEED = 0
+) (
+    input  usbclk,                  // 12MHz for low speed, ~96MHz for full speed (8 samples/bit either way)
     input  usbrst_n,	            // reset
     output  usb_dm, usb_dp,          // USB D- and D+
     input  usb_dm_in, usb_dp_in,    // USB D- and D+ input
@@ -20,6 +31,12 @@ module usb_hid_host (
     output reg report,              // pulse after report received from device. 
                                     // key_*, mouse_*, game_* valid depending on typ
     output conerr,                  // connection or protocol error
+
+    // Debug view for the USB ILA: {connected, state[3:0], pc[13:0]}. pc is the microprogram counter
+    // into usb_hid_host_rom, so it says exactly how far through the enumeration sequence we got --
+    // the difference between "it did not work" and "it stalls at instruction N". Costs nothing when
+    // left unconnected; synthesis optimises it away.
+    output [18:0] dbg_usb,
 
     // keyboard
     output reg [7:0] key_modifiers,
@@ -47,11 +64,11 @@ wire [3:0] save_r;      // which register to save to
 wire [3:0] save_b;      // dat[b]
 wire connected;
 
-ukp ukp(
+ukp #(.FULL_SPEED(FULL_SPEED)) ukp(
     .usbrst_n(usbrst_n), .usbclk(usbclk),
     .usb_dp(usb_dp), .usb_dm(usb_dm), .usb_dp_in(usb_dp_in), .usb_dm_in(usb_dm_in), .usb_oe(usb_oe),
     .ukprdy(data_rdy), .ukpstb(data_strobe), .ukpdat(ukpdat), .save(save), .save_r(save_r), .save_b(save_b),
-    .connected(connected), .conerr(conerr));
+    .connected(connected), .conerr(conerr), .dbg(dbg_usb));
 
 reg  [3:0] rcvct;		// counter for recv data
 reg  data_strobe_r, data_rdy_r;	// delayed data_strobe and data_rdy
@@ -169,7 +186,9 @@ end
 
 endmodule
 
-module ukp(
+module ukp #(
+    parameter FULL_SPEED = 0
+) (
     input usbrst_n,
     input usbclk,				// 12MHz clock
     output usb_dp, usb_dm,		// D+, D-
@@ -181,6 +200,7 @@ module ukp(
     output reg save,			// save: regs[save_r] <= dat[save_b]
     output reg [3:0] save_r, save_b,
     output reg connected,
+    output [18:0] dbg,
     output conerr
 );
 
@@ -195,6 +215,15 @@ module ukp(
     parameter S_S2 = 8;
     parameter S_TOGGLE0 = 9;
     parameter S_TOGGLE1 = 10;
+
+    // Moved up from the bottom of the module. All four are used well above where they were
+    // originally declared. Vivado synthesis tolerates that (it emits a "used before its
+    // declaration" warning and carries on), but xvlog treats it as a hard ERROR -- which meant the
+    // file could not be syntax-checked at all without committing to a full synthesis run. Moving
+    // the declarations makes xvlog usable as a fast pre-build check. Purely a declaration move:
+    // no logic changes.
+    reg    dpi, dmi;
+    reg    ukprdyd, nakd;
 
     wire [3:0] inst;
     reg  [3:0] insth;
@@ -238,7 +267,11 @@ module ukp(
             pc <= 0; connected <= 0; cond <= 0; inst_ready <= 0; state <= S_OPCODE; timing <= 0; 
             mbit <= 0; bitadr <= 0; nak <= 1; ug <= 0;
         end else begin
-            dpi <= usb_dp_in; dmi <= usb_dm_in;
+            // SWAP POINT 1 of 2 (receive). Internally dmi is "the line that idles high", which is
+            // D- at low speed and D+ at full speed. Mapping the pins here means the whole NRZI
+            // decoder, bit sync, NAK detect and SE0 detect below need no changes at all.
+            if (FULL_SPEED) begin dpi <= usb_dm_in; dmi <= usb_dp_in; end
+            else            begin dpi <= usb_dp_in; dmi <= usb_dm_in; end
             save <= 0;		// ensure pulse
             if (inst_ready) begin
                 // Instruction decoding
@@ -361,14 +394,14 @@ module ukp(
         end
     end
 
-    assign usb_dp = up; //: 1'bZ;
-    assign usb_dm = um; //: 1'bZ;
+    // SWAP POINT 2 of 2 (transmit), mirroring the receive swap above. up/um are driven as a
+    // differential pair, except during SE0 where both go low -- and a swap preserves SE0.
+    assign usb_dp = FULL_SPEED ? um : up;
+    assign usb_dm = FULL_SPEED ? up : um;
     assign usb_oe = ug;
+    assign dbg = {connected, state, pc};
     assign sample = inst_ready & state == S_OPCODE & inst == 4'b1101 & timing == 4; // IN
     assign record = connected & ~nak;
     assign ukpstb = ~nrzon & ukprdy & (bitadr[2:0] == 3'b100) & (timing == 2);
-    reg    dpi, dmi; 
-    reg    ukprdyd;
-    reg    nakd;
 endmodule
 

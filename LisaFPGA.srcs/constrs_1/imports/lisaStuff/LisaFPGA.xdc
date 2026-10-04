@@ -288,6 +288,33 @@ set_clock_groups -name async_clk_audio -asynchronous \
     -group [get_clocks -quiet {clk_audio}] \
     -group [get_clocks -quiet {clk_pixel_1080p30 clk_pixel_1080p60 clk_pixel_1024x768* clk_pixel_second_position}]
 
+## ---------------------------------------------------------------------------------------------
+## USB full-speed spike (USB_FULL_SPEED in top.sv). Only binds in a full-speed build; in a stock
+## low-speed build usbclk_fs does not exist, -quiet matches nothing and this applies nothing.
+##
+## The USB clock is genuinely asynchronous to the Lisa clocks: it is a separate protocol domain,
+## and every signal crossing between them already goes through a synchronizer (see the two
+## set_false_path entries near the top of this file, and the synchronizers inside
+## usb_keyboard_interface.sv / usb_mouse_interface.sv). Vivado nonetheless treats them as related
+## because both derive from sysclk, which at 12MHz cost nothing -- an 83ns period made every
+## crossing trivially passable. At ~96MHz that slack is gone and the false relationships would
+## start failing, exactly as clk_audio did once it was re-sourced from the pixel BUFGMUX.
+##
+## NOTE the name is wildcarded on purpose. Vivado renames IP-derived clocks to
+## <output_port>_<ip_instance>, and this one is inside a generate block, so the exact name is not
+## worth guessing. VERIFY IT with `get_clocks` on the first full-speed build rather than assuming
+## this matched -- a group that silently binds nothing looks identical to one that worked.
+set_clock_groups -name async_usbclk_fs -asynchronous \
+    -group [get_clocks -quiet {usbclk_fs*}] \
+    -group [get_clocks -quiet {sys_clk_pin dotck_* clk_pixel_* C16M* COPCK* SCCCK* C5M*}]
+
+## DELIBERATELY NO PULLTYPE ON THE USB PINS. The board provides the 15k pulldowns the USB spec
+## requires for host-side termination (R97-R100 on rev 3), and the device's own pull-up on D+ (full
+## speed) or D- (low speed) is what declares its speed. An FPGA pull-up on either line would look
+## like a device attaching and break speed detection outright. This is called out because the
+## settings-flash debugging ended with "always pull up a floating input" -- that lesson does NOT
+## transfer here; these pins are terminated externally and must stay that way.
+
 ## Make some more false paths going into the Lite Adapter synchronizers for the PH0 and MT signals
 set_false_path -to [get_cells lisa_lite/PH0_int_reg]
 set_false_path -to [get_cells lisa_lite/MT_int_reg]
