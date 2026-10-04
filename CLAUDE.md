@@ -1,5 +1,103 @@
 # LisaFPGA — Project Notes for Claude
 
+## Recently completed: merged upstream (ESFloppy release) into feature/settings-flash-persistence,
+## moved the on-screen menu's summon gesture off OK
+
+**Branch:** `feature/settings-flash-persistence`, now merged with `main` (merge commit `6421dff`).
+
+**Why the merge:** upstream (`alexthecat123/LisaFPGA`) shipped real ESFloppy firmware on 2026-08-18
+(`1ddf2ad`), plus two commits after it. Our fork's `main` was already byte-identical to upstream `main` at
+merge time, so this was really "pull the feature branch forward," not a cross-fork reconciliation. All
+conflicts were confined to `LisaFPGA.runs/impl_1/*` — tracked Vivado build output (bitstream, P&R reports,
+backup `.vdi` files) that both branches had independently regenerated. Resolved by keeping the feature
+branch's own last-built artifacts (`git checkout --ours`); they'll be overwritten by the next real build
+regardless. Zero conflicts in any actual source file (`top.sv`, `HDMI_Interface.sv`, `README.md` all merged
+clean).
+
+**Why the button-logic change:** ESFloppy's new firmware treats a held SEL button (the same physical button
+wired to our `OK` input) as its own long-press gesture — `LONG_PRESS_DURATION = 1000ms` in its `uiState.h`
+triggers a force-eject on its status screen (`ui.cpp`) or a screen-pop in its file picker
+(`uiFilePicker.cpp`). Since our on-screen menu's summon gesture was "hold OK ~3s," and the buttons are wired
+to both the FPGA and the ESFloppy ESP32 in parallel, every attempt to open our menu fired ESFloppy's 1-second
+long-press first — an unwanted eject, every time.
+
+**Fix (in `HDMI_Interface.sv`):** moved the summon gesture from "hold OK ~3s" to "hold LEFT+RIGHT together
+~3s". Verified against ESFloppy's actual firmware source (cloned `alexthecat123/ESFloppy`) that LEFT and
+RIGHT have **no hold-duration logic anywhere** — `ui.cpp`, `uiFilePicker.cpp`, `uiSettingsMenu.cpp` all read
+them only as single-frame "move selection" press edges, so holding both together produces one harmless,
+self-canceling nudge on ESFloppy's screen and nothing escalating. This is the one gesture on the 3-button pad
+that's provably silent to ESFloppy.
+
+Implementation split what used to be one `ok_pressed`-driven state machine into two independent ones:
+- `summon_pressed` (`LEFT && RIGHT`, both active-low) drives a renamed `summon_frames`/`summon_long_fired`
+  counter that toggles `menu_active` — structurally identical to the old `ok_frames`/`ok_long_fired` logic,
+  just keyed off the chord instead of OK.
+- OK's short-press action (activate menu item / cycle tuning axis) is now a plain release-edge detector
+  (`!ok_pressed && prev_ok`), since OK no longer needs to distinguish short vs. long presses — every OK press
+  is short now that it's not doing summon duty.
+- Added `!summon_pressed` guards on the in-menu LEFT/RIGHT highlight-move block and the `tuning_active`
+  offset write-back, so starting/ending the summon hold can't also nudge the menu highlight or (more
+  importantly) walk the image to one edge over the 3-second hold if a user happens to be mid-adjustment when
+  they summon the menu.
+
+**Was untested when written** (superseded by the hardware test below). No Vivado/verilator/iverilog available in this environment (same constraint as
+every prior session on this file) — this is a source-level change only, verified by careful reading and
+structural comparison against the working `ok_pressed` logic it replaces, not by synthesis or a board. Next
+step when hardware is available: build, flash, and confirm (a) LEFT+RIGHT hold opens/closes the menu, (b) a
+disk in ESFloppy survives opening the menu without ejecting, (c) OK still activates menu items and cycles the
+tuning axis/step, (d) tuning-mode LEFT/RIGHT image movement still works normally when summon isn't held.
+
+**Hardware test (2026-10-03): PASSED, and now in flash.** Built at `5ef5c2a` (0 errors, WNS +0.253 / WHS +0.063,
+0 failing setup/hold endpoints, only the 10 known 1080p60 pulse-width entries), JTAG-programmed, then written
+to the config flash and confirmed by a cold boot from flash:
+
+| Test | Result |
+|---|---|
+| (a) LEFT+RIGHT hold opens the menu | **Pass** — volatile, and again after cold boot from flash |
+| (b) disk in ESFloppy survives the summon | **Not yet tested** — ESFloppy's OLED is out of action (see below), so there's no way to see whether a disk ejected |
+| (c) OK activates menu items / cycles tuning axis | **Pass** — OK was how ADJUST IMAGE got turned on |
+| (d) no drift while holding the chord in tuning mode | **Pass** |
+
+Cold boot also brought back the saved alignment, confirming the flash write's `use_file` range left the
+settings block at `0xC00000` alone. **(b) is the one this change exists for** — check it when the replacement
+display arrives.
+
+**Board repair (2026-10-04): USB-C uplink FIXED -- the fault was D5, the USB-C port's ESD clamp.** A failed buck
+converter in the case put an overvoltage on the 5V rail. Symptom: the board powered up, booted and drove video
+normally, but its USB-C uplink enumerated nothing at all -- no CH334F hub, no FT232H, no CP2102N, no ESP32s, all
+four ACT LEDs dark, and not even an "Unknown USB Device" in Device Manager. The ESFloppy OLED also died and is
+still out.
+
+Diagnosis, from the rev 3 netlist (`lisafpga_rev_3_easyeda_project.epro2` is EasyEDA Pro text; the PCB section
+records every pad's net in `PAD_NET` entries, which beats reading the schematic drawing):
+- **D5 is a USBLC6-2SC6** across the USB-C uplink: pins 1/6 `USBC_DP`, 3/4 `USBC_DN`, 5 `5V_USBC`, 2 `GND`. The
+  uplink D+/D- go straight to the **CH334F hub (U15)** pins 15/14.
+- `5V_USBC` (USB-C VBUS) is a separate net from the board's main `5V`; **SW1 is the power switch joining them**,
+  since USB-C is the board's only power input. SW1 was on during the event, so D5 took the overvoltage.
+- D9/D10 are the same part on the keyboard/mouse ports, with VBUS on the main rail. They survived, and those
+  ports still worked -- which argued D5 was not shorted.
+- **The decisive measurement: DC volts on D+ (D5 pin 1) with the board powered and connected to the PC.** A live
+  hub pulls D+ up through 1.5k against the host's 15k pull-down, giving ~3V; a dead hub gives ~0V. It read
+  **0.8V** -- so the hub WAS alive, but something was dragging D+ down to roughly 500 ohms to ground, below the
+  ~2V the host needs to detect an attach. That is why Windows saw nothing at all rather than a failed enumeration.
+- With SW1 off, D5's VBUS net held only D5 and two 100nF caps, yet read 30k to ground where a healthy clamp
+  reads open -- the overstressed clamp had gone leaky on both sides.
+- **Removing D5 brought every device back immediately; a replacement USBLC6-2SC6 (marking `UL26`) was then fitted.**
+  Confirmed afterwards: hub, FT232H (EEPROM identity intact, serial `000000` matching `ft232h_eeprom.bin`), both
+  ESP32-S3s and the CP2102N all enumerate. Vivado then found the onboard FT232H as JTAG target
+  `xilinx_tcf/Xilinx/000000` and the FPGA behind it, so the board's own JTAG path is fully back and
+  `program_board.sh` is usable again. The CP2102N shows Device Manager problem code 28 on the Windows
+  machine, which is only a missing Silicon Labs CP210x driver -- it reports its custom "LisaFPGA Serial B" string,
+  so the chip and its EEPROM are fine.
+
+**Lesson for any future "board runs but USB is dead":** measure D+ before replacing anything. ~0V = hub dead or
+unpowered, ~3V = hub fine and the problem is elsewhere, anything in between = something leaking on the line.
+And remove a suspect protection part *before* fitting its replacement -- testing with it absent is unambiguous,
+whereas a straight swap that still fails can't tell a bad new part from a wrong diagnosis.
+
+While the uplink was down, the 2026-10-03 hardware test above went through an external Digilent programmer on
+header J19, which Vivado recognises natively; it remains a good fallback.
+
 ## Current work: HDMI output modes — 1080p30 / 1080p60 / 1024x768, runtime selectable
 
 **Branch:** `feature/1024x768-hdmi-output` (created off `main`, not yet merged or pushed). Commit `6dbe125`
@@ -146,6 +244,28 @@ run anyway, so the build "succeeded" while doing the wrong thing.
   (`settings_flash`, the two save/load handshake blocks in `top.sv`, and `IO_board`); `sysclk_ibuf` goes
   only to MMCM reference inputs. Check WHS, not just WNS, on any build where a debug core is added or
   removed.
+- **Flash programming from Vivado fails at the default 15MHz JTAG clock. Use 3MHz.** (Found 2026-10-03.)
+  `program_hw_cfgmem` erased fine, then wrote ~1.48MB correctly before `Program/Verify Operation failed.
+  Byte 1551953 does not match (FF != 00)` — `[Labtools 27-3347] Flash Programming Unsuccessful`. **The
+  error text blames the flash part ("verify the selected flash part matches"), and that is a red herring**:
+  Vivado had just read the JEDEC ID itself (`ef 40 18`, correct for the W25Q128JV) and the erase had worked.
+  A write that succeeds for a megabyte and a half and then drops a byte is a marginal link, not a wrong part.
+  The same `27-3347` failure happened in August through the board's onboard FT232H, so it is not specific to
+  one programmer. Fix, before creating the cfgmem:
+  ```tcl
+  close_hw_target
+  set_property PARAM.FREQUENCY 3000000 [current_hw_target]
+  open_hw_target
+  ```
+  Then succeeded first time, in 2m41s. Closing the target invalidates `current_hw_device` and any existing
+  cfgmem handle, so reselect the device and recreate the cfgmem afterwards.
+  The correct part string for this board's **W25Q128JVSIQ** is **`w25q128jvq-spi-x1_x2_x4`** — the trailing
+  `Q` in the ordering code is Winbond's fixed-Quad-Enable variant, which Vivado lists as `jvq`. (`jvm` is the
+  DTR variant; `_x8` entries are for dual-parallel flash pairs.) Always set
+  `PROGRAM.ADDRESS_RANGE use_file`: it erases only the bitstream's sectors (`0x000000`-`0x3A607B`), which is
+  what keeps the saved settings block at `0xC00000` alive across a reflash — confirmed by cold boot.
+  **If a flash write fails, do not power-cycle**: the bitstream region is erased or partial and the board
+  will come up unconfigured. JTAG still works and a retry recovers it.
 - To iterate faster when RTL *has* changed, `STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY none` (skips the
   phase that eats the hour) and `.DIRECTIVE RuntimeOptimized` help a lot; turn both off for a final build.
 
