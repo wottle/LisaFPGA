@@ -16,6 +16,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 // ---------------------------------------------------------------------------
+//
+// LisaFPGA: imported from m1nl/usb_hid_host commit e492176 (rtl/usb_hid_host.v). Local changes, all marked
+// "LisaFPGA" below, add per-device support for composite devices whose keyboard is not interface 0:
+//   - proto_payload: the interface number and CRC16 SET_PROTOCOL uses (microcode load addresses 14, 15, 7)
+//   - a VID/PID override of typ and of the polled IN endpoint
+//   - strict_boot: drop reports shorter than a boot report, for interfaces that also carry other reports
+// The microcode change that goes with this is in tools/usb_ucode/ukp.s.
 
 `default_nettype none
 `timescale 1ns / 1ps
@@ -107,6 +114,9 @@ ukp #(
 
 reg [7:0] in_payload  [0:1];  // USB IN request payload data for endpoint specific to a given VID, PID
 reg [7:0] out_payload [0:1];  // USB OUT request payload data for endpoint specific to a given VID, PID
+reg [7:0] proto_payload [0:2];  // LisaFPGA: SET_PROTOCOL wIndex, CRC16 low, CRC16 high, per VID/PID
+reg       strict_boot;        // LisaFPGA: only accept full 8-byte boot reports from this device
+reg [3:0] pkt_len;            // LisaFPGA: bytes strobed into dat[] for the current packet
 reg       x_input;            // indicates if pad should be polled in X-Input mode
 reg [7:0] polling_interval;   // polling interval in ms
 
@@ -135,7 +145,9 @@ always @(posedge clk) begin
     regs[addra[2:0]] <= dat[addrb[2:0]];
 
   end else if (load) begin
-    if (addra < 8)
+    if (addra == 7)        // LisaFPGA: SET_PROTOCOL CRC16 high (regs[7] is otherwise unused)
+      load_data <= proto_payload[2];
+    else if (addra < 8)
       load_data <= regs[addra[2:0]];
     else if (addra == 8)   // IN payload
       load_data <= in_payload[0];
@@ -149,6 +161,10 @@ always @(posedge clk) begin
       load_data <= x_input ? 8'b1 : 8'b0;
     else if (addra == 13)  // polling interval
       load_data <= polling_interval;
+    else if (addra == 14)  // LisaFPGA: SET_PROTOCOL wIndex (interface number)
+      load_data <= proto_payload[0];
+    else if (addra == 15)  // LisaFPGA: SET_PROTOCOL CRC16 low
+      load_data <= proto_payload[1];
   end
 end
 
@@ -165,9 +181,11 @@ always @(posedge clk) begin
     typ         <= 0;
     full_report <= connerr;  // send empty report on connection error
     rcvct       <= 0;
+    pkt_len     <= 0;
 
   end else if (ukpstart) begin
     rcvct       <= 0;  // mark start of read transaction
+    pkt_len     <= 0;
     full_report <= 0;
 
   end else if (ukprdy) begin
@@ -177,6 +195,8 @@ always @(posedge clk) begin
     if (ukpstb) begin
       rcvct      <= rcvct + 1;
       dat[rcvct] <= ukpdat;  // record byte from a packet
+      if (pkt_len != 4'hf)
+        pkt_len  <= pkt_len + 1;
     end
   end else begin
     ukprdy_r    <= ukprdy;
@@ -184,11 +204,16 @@ always @(posedge clk) begin
     full_report <= 0;
 
     if (ukprdy_r) begin     // individual packet received, ukprdy is not asserted
-      rcvct <= rcvct - 2;   // ignore CRC16, important when packets are split
+      rcvct   <= rcvct - 2; // ignore CRC16, important when packets are split
+      pkt_len <= 0;
 
       if (connected) begin  // change typ after a first valid report
         typ         <= typ_next;
-        full_report <= 1;
+        // LisaFPGA: with strict_boot, a packet that put fewer than 8 bytes into dat[] is not a boot keyboard
+        // report (e.g. a 3-byte consumer-control report sharing the endpoint) and is dropped. An 8-byte
+        // report strobes exactly 8 -- its CRC is suppressed by the wk >= 15 test in ukp -- while a shorter
+        // one strobes its data plus both CRC bytes, so a 3-byte report shows up as 5.
+        full_report <= !strict_boot || pkt_len >= 8;
       end
     end
 
@@ -208,6 +233,9 @@ always @(*) begin
   x_input  = 0;
 
   casez ({regs[4], regs[5], regs[6], vid, pid})  // INTERFACE_CLASS, INTERFACE_SUBCLASS, INTERFACE_PROTOCOL, VID, PID
+    // LisaFPGA: Keychron 2.4GHz receiver. Interface 0 is a boot mouse, which is all the class check above sees;
+    // the keyboard is interface 2 (EP 0x87). Must come first so the generic mouse entry doesn't claim it.
+    {8'hzz, 8'hzz, 8'hzz, 16'h3434, 16'hd030}: if (KEYBOARD_SUPPORT) typ_next = 1;
     {8'h03, 8'h01, 8'h01, 16'hzzzz, 16'hzzzz}: if (KEYBOARD_SUPPORT) typ_next = 1;  // keyboard
     {8'h03, 8'h01, 8'hzz, 16'hzzzz, 16'hzzzz}: if (MOUSE_SUPPORT)    typ_next = 2;  // mouse
     {8'h03, 8'hzz, 8'hzz, 16'hzzzz, 16'hzzzz}: if (GAME_SUPPORT)     typ_next = 3;  // other (incl. 8BitDo, D-Input)
@@ -222,7 +250,28 @@ end
 // set in_payload and out_payload payload depending on VID, PID
 // ref: https://rayslogic.com/Propeller/USB.htm#USB%20Token
 always @(*) begin
+  // LisaFPGA: defaults -- SET_PROTOCOL to interface 0 (the bytes the original microcode had as constants),
+  // and accept every report
+  proto_payload[0] = 8'h00;  // wIndex = interface 0
+  proto_payload[1] = 8'hc6;  // CRC16 of 21 0b 00 00 00 00 00 00
+  proto_payload[2] = 8'he0;
+  strict_boot      = 1'b0;
+
   casez ({vid, pid})
+    {16'h3434, 16'hd030}: begin
+      in_payload[0] = 8'h81;   // IN endpoint 7 (81 23): interface 2, the keyboard
+      in_payload[1] = 8'h23;
+
+      out_payload[0] = 8'h01;  // OUT endpoint 2 (01 c1) - default, unused
+      out_payload[1] = 8'hc1;
+
+      proto_payload[0] = 8'h02;  // SET_PROTOCOL(boot) to interface 2
+      proto_payload[1] = 8'hc7;  // CRC16 of 21 0b 00 00 02 00 00 00
+      proto_payload[2] = 8'h58;
+
+      strict_boot = 1'b1;  // interface 2 also carries consumer / system-control reports
+    end  // LisaFPGA: Keychron 2.4GHz receiver -- descriptor read from the real device, CRCs checked against
+         // the fork's known packets
     {16'h2dc8, 16'h301c},
     {16'h2dc8, 16'h310a}: begin
       in_payload[0] = 8'h01;   // IN endpoint 4 (01 ba)

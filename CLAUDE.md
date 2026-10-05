@@ -891,7 +891,7 @@ delays in absolute time, so they must not scale with bit rate. The m1nl core get
   40 keep-alives were seen. It shows order and count, not durations.
 
 **The fork: [m1nl/usb_hid_host](https://github.com/m1nl/usb_hid_host)**, Apache-2.0, copyright
-nand2mario (2023) and Mateusz Nalewajski (2026); imported at commit `e492176`, files unmodified. One
+nand2mario (2023) and Mateusz Nalewajski (2026); imported at commit `e492176` (since modified for the Keychron receiver, below). One
 60MHz core detects per device whether it is full speed (5x oversampling) or low speed (a /5 prescaler
 giving 8x), sends SOF every 1ms at full speed, and is proven on hardware (EBAZ4205) with an 8BitDo
 controller, a Logitech keyboard and others. **No hub support** -- Apple keyboards with ports still will
@@ -967,10 +967,40 @@ has its own timing. **Confirmed: with the CPU dialled back, repeat is normal on 
 decouple it from the video timing software expects -- the same class of overclock issue the README handles by
 patching MacWorks Plus rather than the hardware.
 
-**Keychron 2.4GHz receiver (VID 3434, PID D030) does not work, and is parked.** It is a composite device with four
-interfaces: MI_00 mouse, MI_01 game/vendor, MI_02 keyboard, MI_03 vendor. The core enumerates only the first
-interface, so it would find a mouse, not the keyboard; supporting it needs the microcode to pick the keyboard
-interface. The fork's README also lists composite receivers (8BitDo) as not working.
+**Keychron 2.4GHz receiver (VID 3434, PID D030): WORKS (hardware-confirmed 2026-10-05: typing, media keys correctly ignored, Lenovo regression passed) via a per-device override.**
+Its configuration descriptor, read from the real device on Windows through the hub driver's
+`IOCTL_USB_GET_DESCRIPTOR_FROM_NODE_CONNECTION` (USBView's method; no viewer was installed):
+
+| Interface | Class/sub/proto | Contents | IN endpoint |
+|---|---|---|---|
+| 0 | 03/01/02 | boot mouse | `0x82` |
+| 1 | 03/01/01 | claims boot keyboard, but is a barcode reader + game controller | `0x84` (+ OUT `0x05`) |
+| 2 | 03/01/01 | **the keyboard**, plus consumer and system control | `0x87`, 32-byte max packet |
+| 3 | 03/00/00 | vendor-defined | `0x83` |
+
+Why it did nothing at all: the core classifies a device from interface 0 only (it reads just 18 bytes of the
+configuration descriptor), always polls **endpoint 1, which this receiver does not have**, and sends its HID
+setup requests to interface 0. The fix follows the fork's own VID/PID override pattern (its 8BitDo Ultimate 2C
+entry), all marked "LisaFPGA" in `usb_hid_host.v`:
+- `typ` forced to keyboard and the IN token set to endpoint 7 (`81 23`).
+- **SET_PROTOCOL(boot) sent to interface 2.** The microcode's SET_PROTOCOL now takes wIndex and CRC16 from
+  `proto_payload`, via the previously unused load addresses 14, 15 and 7 (`regs[7]` is never written: `save 15`
+  is diverted to the `connected` flag). Every other device gets the original constant bytes `00` / `C6 E0`.
+- **`strict_boot`** drops packets that put fewer than 8 bytes into `dat[]`, because interface 2 also carries
+  consumer/system reports that would decode as phantom modifiers. Byte counting is exact: an 8-byte report strobes
+  exactly 8 (data byte k is strobed at `wk = 72 - 8k`; the first CRC byte arrives at `wk = 8`, below the `>= 15`
+  cut-off), while a 3-byte report strobes data + both CRC bytes = 5.
+- New CRCs computed in PowerShell and validated against every token/setup packet the fork already sends
+  (CRC5 `00 10`, `01 E8`, `81 58`, `01 BA`, `81 0A`; CRC16 `C6 E0`, `D6 20`, `EE 0F`) before use.
+- **Microcode source and assembler now live in `tools/usb_ucode/`**: `ukp.s` (from the fork, with the change
+  above) and `asukp.ps1`, a PowerShell port of the fork's `asukp.py` (no Python on the Windows machine). The port
+  reproduces the fork's shipped `.mem` byte-identically from the unmodified source. Its default output is the
+  build's ROM image. **The ROM is 1012 of 1024 nibbles** -- jump targets are `addr >> 2` in two nibbles, so it
+  can never grow past 1024; any further microcode work has very little room.
+
+The receiver's mouse (interface 0) is not exposed: a port carries one device type. Adding another composite
+device means another VID/PID entry: read its descriptor the same way, compute the IN token CRC5 and the
+SET_PROTOCOL CRC16, and decide whether it needs `strict_boot`.
 
 **Hub support (the actual Apple-keyboard goal) remains a separate project.** It needs full speed (which
 this provides), then hub enumeration: address the hub, power its ports, poll its status endpoint, reset
