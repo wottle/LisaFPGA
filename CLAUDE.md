@@ -266,6 +266,10 @@ run anyway, so the build "succeeded" while doing the wrong thing.
   what keeps the saved settings block at `0xC00000` alive across a reflash — confirmed by cold boot.
   **If a flash write fails, do not power-cycle**: the bitstream region is erased or partial and the board
   will come up unconfigured. JTAG still works and a retry recovers it.
+  **After a build that drops a debug core, clear the probes file before flashing**: reopening the target at 3MHz
+  makes Vivado re-point `PROBES.FILE` at a stale `top.ltx`, and `refresh_hw_device` then fails with
+  `[Common 17-48] File not found: ...top.ltx`. Harmless (the SPI loader is already in), but clear it:
+  `set_property PROBES.FILE {} [current_hw_device]` and the same for `FULL_PROBES.FILE`, then refresh.
 - To iterate faster when RTL *has* changed, `STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY none` (skips the
   phase that eats the hour) and `.DIRECTIVE RuntimeOptimized` help a lot; turn both off for a final build.
 
@@ -1011,7 +1015,8 @@ blind -- add one only if that is actually seen.
 
 **Production build (2026-10-05):** `DEBUG_USB_ILA = 0` and the `.xpr` back on default synthesis settings (Vivado
 rewrote `<Step Id="synth_design"/>` itself after `set_property ... FLATTEN_HIERARCHY rebuilt` / `DIRECTIVE
-Default`). Intended for the flash once it passes JTAG testing with all four devices.
+Default`). **Flashed 2026-10-05** at 3MHz JTAG and cold-booted from flash with the saved settings intact (WNS +0.302 / WHS
++0.079, 0 failing setup/hold endpoints; LUTs 33.2% without the ILA).
 
 **Next: runtime detection vs. a soft CPU (decided: a soft CPU, on a new feature branch for hub support).**
 Discovering the interface and endpoint at attach time on the current core would mean reading the full configuration
