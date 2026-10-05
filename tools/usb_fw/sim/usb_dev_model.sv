@@ -110,6 +110,11 @@ module usb_dev_model #(
                 ones = b ? ones + 1 : 0;
                 cur = {b, cur[7:1]};
                 if (++nbits % 8 == 0) pkt.push_back(cur);
+                if (nbits == 8 && cur == 8'h3C) begin   // PRE: a low-speed packet for a hub port follows.
+                    wait (lse0); wait (!lse0);          // Full-speed devices ignore it, up to its EOP.
+                    ok = 0;
+                    return;
+                end
             end
             #(T);
         end

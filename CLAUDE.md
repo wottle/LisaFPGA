@@ -1027,7 +1027,17 @@ ROM with 12 nibbles free (removing the unused gamepad/X-Input code would buy som
 CPU running a C USB host stack gets runtime detection, combo receivers and hubs from one design, so per-device entries
 remain the stopgap until then.
 
-**Hub support (the actual Apple-keyboard goal) remains a separate project.** It needs full speed (which
+**UPDATE 2026-10-05: superseded by the soft-CPU USB host on `feature/usb-hub-support` -- hubs WORK on
+hardware.** `USB_HOST_SOFTCPU = 1'b1` in `top.sv` replaces both m1nl cores with PicoRV32 + `usb_sie` packet
+engines + C firmware (`tools/usb_fw`). No VID/PID tables: interfaces are chosen from HID report descriptors.
+Hardware-confirmed: Lenovo keyboard/mouse, Keychron and Logitech receivers, wired Apple mouse, older Apple
+keyboard with a mouse in its socket, aluminium Apple keyboard. Flashed as a test build (fast synthesis, one
+32 ps HDMI-menu timing miss). **The aluminium keyboard browns out the board on a weak USB-C supply** (whole FPGA
+resets on plug-in) and is fine on a stronger one. Everything -- design, simulation, results, gotchas -- is in
+`docs/usb_softcpu_host_design.md`; read that, not the paragraph below, before touching USB. Reverting to the
+m1nl core is `USB_HOST_SOFTCPU = 1'b0` plus a rebuild (the m1nl production bitstream is not in git).
+
+**Hub support (the actual Apple-keyboard goal) remains a separate project.** (Historical -- see above.) It needs full speed (which
 this provides), then hub enumeration: address the hub, power its ports, poll its status endpoint, reset
 the port a device appears on, and enumerate that device at a second address. Either extend the microcode
 for one hub and one device, or run a C USB stack on a soft CPU. If the keyboard behind an Apple hub is

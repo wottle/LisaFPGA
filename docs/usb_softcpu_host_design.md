@@ -1,6 +1,6 @@
 # USB host on a soft CPU — design
 
-Branch `feature/usb-hub-support`. Status: **phases 0-2 done in simulation; first hardware build next** (2026-10-05).
+Branch `feature/usb-hub-support`. Status: **working on hardware, hubs included (2026-10-05); production build next** (2026-10-05).
 
 ## Progress log
 - **Phase 0 (2026-10-05):** toolchain = xPack riscv-none-elf-gcc 15.2.0-1 (sha256 verified), unpacked to
@@ -38,6 +38,27 @@ Branch `feature/usb-hub-support`. Status: **phases 0-2 done in simulation; first
   Report output registers: `0x1000_0010`/`14` keyboard (writing `14` emits the report), `0x1000_0018` mouse.
   `top.sv` gains `USB_HOST_SOFTCPU` (default 1): when set, `usb_softcpu` replaces both m1nl cores and its
   reports feed the existing CDC unchanged; the ILA debug probe shows the firmware debug word.
+- **Phase 3 + 4, simulation (2026-10-05): hubs and PRE work.** `usb_hub_model.sv` is a behavioural full-speed hub:
+  hub-class requests and the status-change endpoint, plus a bit-level repeater that copies host traffic to
+  enabled full-speed ports, copies the packet after a PRE to low-speed ports with D+/D- swapped, and copies
+  responses back up. `tb_hub.sv`: hub on board port 0 with a full-speed keyboard on hub port 1 and a LOW-speed
+  mouse on hub port 2. The firmware enumerates the hub (as 05AC:1006, 3 ports), powers and resets both ports,
+  enumerates both devices behind it -- the mouse entirely through PRE (66 PRE packets) -- and reports from both
+  reach the Lisa-side outputs. No protocol errors. ~11 min. The first run failed on a bug in the hub MODEL (a
+  ternary between two assignment patterns sent PID 00 instead of ACK); the firmware correctly reported it.
+  First hardware build (fast synthesis): firmware file read OK; WNS -0.032 on ONE HDMI-menu path at 1080p60
+  (`video_mode` -> `menu_pixel`, unrelated to USB, moved by the fast settings), WHS +0.087; 21656 LUTs (34.2%),
+  41 BRAM tiles, BUFGCTRL unchanged at 28/32.
+- **Hardware (2026-10-05): WORKS, and now in flash.** First soft-CPU build (fast synthesis), JTAG then flashed.
+  Regression with no VID/PID tables: Lenovo keyboard and mouse (low speed), Keychron 2.4GHz receiver, wired
+  Apple mouse, Logitech nano mouse receiver -- all work. **Hubs work on hardware first time**: the older Apple
+  keyboard (05AC:1001 hub) with a mouse in its socket, and the aluminium Apple keyboard (05AC:1006 hub).
+  Occasional missed keys on the older Apple keyboard were not reproducible later and looked like the keyboard.
+  **Power finding:** plugging in the aluminium keyboard reset the whole FPGA (it came back on the flash build)
+  on the original USB-C supply -- with or without a mouse in its socket -- and works fine on a stronger supply.
+  A brownout, not USB logic. Its hub asks for 300 mA, switches power per port, and the board's keyboard-port
+  VBUS is the main 5V rail with no current limiting. Possible firmware mitigation if needed: power the
+  non-removable (built-in keyboard) port first and the external ports after a pause, to spread the inrush.
 
 ## Goal
 
