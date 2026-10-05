@@ -28,6 +28,9 @@ set_false_path -to [get_cells lisa_hdmi_output/_reset_hdmi_int_reg]
 set_false_path -to [get_cells io_board/_RESET_int_reg]
 ## False-path into the first stage of the USB reset synchronizer
 set_false_path -to [get_cells usbrst_int_reg]
+## ...and into the first stage of the USB host-core reset synchroniser (top.sv), which crosses the same
+## Lisa reset into usbclk_core. -quiet because the cell name is only certain once synthesised.
+set_false_path -to [get_cells -quiet usb_core_rst_n_int_reg]
 ## False-path into the first stage of the I/O board AS synchronizer
 set_false_path -to [get_cells io_board/_AS_int_reg]
 ## False-path into the INTIO synchronizer on the I/O board; ignore it because the synchronizer once again handles the DOTCK-to-C16M CDC
@@ -289,24 +292,27 @@ set_clock_groups -name async_clk_audio -asynchronous \
     -group [get_clocks -quiet {clk_pixel_1080p30 clk_pixel_1080p60 clk_pixel_1024x768* clk_pixel_second_position}]
 
 ## ---------------------------------------------------------------------------------------------
-## USB full-speed spike (USB_FULL_SPEED in top.sv). Only binds in a full-speed build; in a stock
-## low-speed build usbclk_fs does not exist, -quiet matches nothing and this applies nothing.
+## USB host core clock (USB_FULL_SPEED in top.sv). Only binds in a full-speed build; in a low-speed-only
+## build usbclk_fs does not exist, -quiet matches nothing and this applies nothing.
 ##
-## The USB clock is genuinely asynchronous to the Lisa clocks: it is a separate protocol domain,
-## and every signal crossing between them already goes through a synchronizer (see the two
-## set_false_path entries near the top of this file, and the synchronizers inside
-## usb_keyboard_interface.sv / usb_mouse_interface.sv). Vivado nonetheless treats them as related
-## because both derive from sysclk, which at 12MHz cost nothing -- an 83ns period made every
-## crossing trivially passable. At ~96MHz that slack is gone and the false relationships would
-## start failing, exactly as clk_audio did once it was re-sourced from the pixel BUFGMUX.
+## usbclk_fs (60MHz) clocks the two m1nl usb_hid_host cores. It is genuinely asynchronous to everything
+## else: the Lisa clocks, and the 12MHz usbclk_clock_divider that clocks usb_keyboard_interface /
+## usb_mouse_interface. Reports cross from it into that 12MHz domain ONLY through xpm_cdc_handshake
+## (top.sv), which carries its own constraints. Vivado nonetheless treats all of these as related,
+## because they all derive from sysclk -- and at 60MHz the false relationships would fail, exactly as
+## clk_audio did once it was re-sourced from the pixel BUFGMUX.
 ##
-## NOTE the name is wildcarded on purpose. Vivado renames IP-derived clocks to
-## <output_port>_<ip_instance>, and this one is inside a generate block, so the exact name is not
-## worth guessing. VERIFY IT with `get_clocks` on the first full-speed build rather than assuming
-## this matched -- a group that silently binds nothing looks identical to one that worked.
+## usbclk_clock_divider is named EXACTLY, not wildcarded: a usbclk* wildcard would also match
+## usbclk_fs and put one clock in both groups. It did not exist at all in the earlier 96MHz spike
+## builds, where usbclk WAS the fast clock and clock_divider's 12MHz output went unused and was trimmed.
+##
+## The usbclk_fs name is wildcarded because Vivado renames IP-derived clocks to
+## <output_port>_<ip_instance>; it resolved to usbclk_fs_usb_fs_clock on the spike builds. VERIFY both
+## names with get_clocks on each new build -- a group that silently binds nothing looks identical to
+## one that worked.
 set_clock_groups -name async_usbclk_fs -asynchronous \
     -group [get_clocks -quiet {usbclk_fs*}] \
-    -group [get_clocks -quiet {sys_clk_pin dotck_* clk_pixel_* C16M* COPCK* SCCCK* C5M*}]
+    -group [get_clocks -quiet {sys_clk_pin dotck_* clk_pixel_* C16M* COPCK* SCCCK* C5M* usbclk_clock_divider}]
 
 ## DELIBERATELY NO PULLTYPE ON THE USB PINS. The board provides the 15k pulldowns the USB spec
 ## requires for host-side termination (R97-R100 on rev 3), and the device's own pull-up on D+ (full

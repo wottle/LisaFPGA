@@ -3,20 +3,21 @@
 #
 #     source tools/vivado_scripts/capture_usb_ila.tcl
 #     usb_probes                 ;# list the probes actually present, with their real names
-#     usb_arm_activity           ;# capture 1: first line activity, full rate -- the signal-quality one
-#     usb_arm_connect            ;# capture 2: the moment the core decides a device is connected
-#     usb_arm_error              ;# capture 3: conerr asserting, with pre-trigger history
+#     usb_arm_attach  [port]     ;# capture 1: device attaches -- idle polarity, i.e. what speed it offers
+#     usb_arm_device  [port]     ;# capture 2: the device's first reply -- THE signal-quality capture
+#     usb_arm_enum    [port]     ;# capture 3: the VID becomes non-zero -- the device descriptor was read
 #     usb_run                    ;# arm (non-blocking), then plug the device in
 #     usb_status                 ;# has it triggered?
 #     usb_fetch <tag>            ;# upload + waveform + CSV
 #
-# Reading the waveform (see add_usb_ila.tcl for the packing):
-#   usb_p1_lines / usb_p0_lines : bit4 dp_in, bit3 dm_in, bit2 oe, bit1 dp_out, bit0 dm_out
-#   usb_p1_dbg  / usb_p0_dbg    : bit18 connected, bits17:14 state, bits13:0 pc (microprogram counter)
-#   usb_status                  : bit7:6 p1_typ, bit5 p1_report, bit4 p1_conerr,
-#                                 bit3:2 p0_typ, bit1 p0_report, bit0 p0_conerr
+# port: 1 = KBD connector (default), 0 = MOUSE connector.
 #
-# typ: 0 = no device, 1 = keyboard, 2 = mouse, 3 = gamepad.
+# Probes appear individually, named after their source nets (see the TRIGGER DESIGN note below):
+#   usb_dp_in_portN, usb_dm_in_portN  : the lines as the FPGA sees them
+#   usb_dp_out_portN, usb_dm_out_portN, usb_oe_portN : what the host core drives, and when
+#   usb_dbg_portN [18:0]              : the device VID (bits 15:0) plus low PID bits -- zero until enumerated
+#   usb_typ_portN, usb_report_portN   : typ 0 = none, 1 = keyboard, 2 = mouse, 3 = gamepad
+#   usb_conerr_portN                  : the core connerr flag (connection or protocol error)
 #
 # IDLE POLARITY IS THE THING TO LOOK AT FIRST. A full-speed device idles J = D+ HIGH, D- low.
 # A low-speed device idles the other way round. So with a device plugged in and nothing happening,
@@ -53,6 +54,12 @@ proc _udc {p} {
 }
 
 proc _ureset {} {
+    # Full refresh first. After a fetch, the Hardware Manager regularly drops its probe association and
+    # the next run_hw_ila fails with "Labtools 27-188: Use refresh_hw_device ... with a valid
+    # debug_nets.ltx". Doing it here, at the start of every arm, means it is never needed by hand. It is
+    # safe because nothing is armed yet; usb_status still refreshes with -update_hw_probes false, since a
+    # full refresh there could knock an armed core out of its waiting state.
+    refresh_hw_device -quiet [current_hw_device]
     set ila [_uila]
     set_property CONTROL.DATA_DEPTH 4096 $ila
     set_property CONTROL.TRIGGER_CONDITION AND $ila
@@ -63,50 +70,122 @@ proc _ureset {} {
     }
 }
 
-# ---- capture 1: first line activity, at full rate -- THE SIGNAL-QUALITY CAPTURE ----------------
-# Trigger the moment port 1's D+ leaves the full-speed idle (J) state, i.e. dp_in goes low, and
-# store every 96MHz tick. 4096 samples = 42.7us, and a full-speed bit is 8 samples, so this covers
-# roughly 512 bit times of real traffic at maximum detail.
+# ============================================================================================
+# TRIGGER DESIGN -- READ BEFORE ADDING ONE. Two traps, both hit when this script was first used:
 #
-# This is the capture that answers the actual hardware question: with no series resistors on D+/D-,
-# are the J/K transitions clean, or is there ringing and reflection? Look for transitions that take
-# more than a sample or two to settle, or bits sampled inconsistently at the 8x points.
-# Trigger position is late in the buffer so a good chunk of the idle line before the first packet is
-# captured too -- a noisy idle is just as informative as a noisy edge.
-proc usb_arm_activity {} {
+# 1. PROBE NAMES. The ILA's hardware inputs are concatenations ({dp_in, dm_in, oe, ...}), but
+#    Vivado's .ltx names every bit after its SOURCE NET, so the probes appear individually:
+#    usb_dp_in_port1, usb_oe_port1, usb_dbg_port1, usb_conerr_port1, usb_typ_port1, ... The packed
+#    names in add_usb_ila.tcl (usb_p1_lines etc.) never exist at runtime. Run usb_probes to check.
+#
+# 2. AN EMPTY PORT IS NOT QUIET. With nothing plugged in, D+ and D- both sit LOW on the board's 15k
+#    pull-downs, so "D+ is low" is already true and a trigger on it fires instantly on nothing.
+#    The original core's conerr was a watchdog (no data for 2^23 clocks) that also tripped on an empty
+#    port, which is why no trigger here uses connerr alone. Every trigger below is a condition that
+#    can ONLY occur with a device present.
+#
+# All take an optional port: 1 = KBD connector (default), 0 = MOUSE connector.
+# ============================================================================================
+
+# ---- capture 1: attach -- idle polarity -----------------------------------------------------
+# Fires when D+ goes high. Nothing on the host side drives D+ high while idle, so only a FULL-SPEED
+# device's 1.5k pull-up can do it. Captures the attach and ~60us of the idle bus afterwards (4096 samples at 60MHz = 68us).
+# Read: dp_in=1 / dm_in=0 at idle = attached as full speed, which is what this build needs.
+# (A low-speed device pulls D- instead, so this trigger never fires for one -- that is the test.)
+proc usb_arm_attach {{port 1}} {
     set ila [_uila]
     _ureset
-    set_property TRIGGER_COMPARE_VALUE eq5'b0XXXX [_up usb_p1_lines]
-    set_property CONTROL.CAPTURE_MODE ALWAYS $ila
+    set_property TRIGGER_COMPARE_VALUE eq1'b1 [_up usb_dp_in_port${port}]
     set_property CONTROL.TRIGGER_POSITION 512 $ila
-    puts "Armed: trigger on port1 D+ going low (leaving full-speed idle), full rate, 42.7us window."
-    puts "If this never fires, check the idle polarity first -- a low-speed device idles D+ LOW,"
-    puts "so it would already be sitting in the trigger condition rather than entering it."
+    puts "Armed: port $port, trigger on D+ high (a full-speed device attaching)."
 }
 
-# ---- capture 2: connection detected ------------------------------------------------------------
-# The core sets `connected` once it believes a device is attached. Triggering on the transition
-# shows the attach sequence and the start of the enumeration microprogram that follows.
-proc usb_arm_connect {} {
+# ---- capture 2: the device answers -- THE SIGNAL-QUALITY CAPTURE ----------------------------
+# Fires on the first K state (D+ low, D- high) while the host is NOT driving (oe=0). At full speed
+# the idle bus is J, the host's own packets are excluded by oe, and so the only thing that can put a
+# K on the bus with oe low is the DEVICE starting its reply (its SYNC begins with K).
+# Trigger position is mid-buffer, so the ~21us before it holds the host's request and the ~21us
+# after holds the device's reply: that is the whole question answered in one capture -- did the
+# device respond, and are the edges clean with no series resistors?
+proc usb_arm_device {{port 1}} {
     set ila [_uila]
     _ureset
-    set_property TRIGGER_COMPARE_VALUE eq19'b1XXXXXXXXXXXXXXXXXX [_up usb_p1_dbg]
-    set_property CONTROL.CAPTURE_MODE ALWAYS $ila
-    set_property CONTROL.TRIGGER_POSITION 256 $ila
-    puts "Armed: trigger on port1 connected=1, full rate."
-}
-
-# ---- capture 3: protocol error, with history ---------------------------------------------------
-# conerr means the core gave up. Trigger position mid-buffer so the traffic LEADING UP to the
-# failure is captured, which is the part that says why -- and note the pc value at the failure,
-# since that pinpoints where in the enumeration ROM it died.
-proc usb_arm_error {} {
-    set ila [_uila]
-    _ureset
-    set_property TRIGGER_COMPARE_VALUE eq8'bXXX1XXXX [_up usb_status]
-    set_property CONTROL.CAPTURE_MODE ALWAYS $ila
+    set_property TRIGGER_COMPARE_VALUE eq1'b0 [_up usb_oe_port${port}]
+    set_property TRIGGER_COMPARE_VALUE eq1'b0 [_up usb_dp_in_port${port}]
+    set_property TRIGGER_COMPARE_VALUE eq1'b1 [_up usb_dm_in_port${port}]
     set_property CONTROL.TRIGGER_POSITION 2048 $ila
-    puts "Armed: trigger on port1 conerr, mid-buffer so the run-up to the failure is captured."
+    puts "Armed: port $port, trigger on the device driving K with the host released."
+    puts "If this fires instantly on plug-in, suspect a LOW-speed device: its idle state is"
+    puts "exactly this condition, so it would trigger before any reply."
+}
+
+# ---- capture 3: enumeration got far enough to read the device descriptor ---------------------
+# With the m1nl core, usb_dbg_portN carries the low 19 bits of dbg_hid_regs: the device's VID plus the
+# low bits of its PID. Those registers are zero until the core has actually read the device
+# descriptor, so "VID != 0" is the clearest single sign that enumeration is working. (On the original
+# core these bits were {connected, state, pc}; that trigger no longer applies.)
+proc usb_arm_enum {{port 1}} {
+    set ila [_uila]
+    _ureset
+    set_property TRIGGER_COMPARE_VALUE neq19'b0000000000000000000 [_up usb_dbg_port${port}]
+    set_property CONTROL.TRIGGER_POSITION 2048 $ila
+    puts "Armed: port $port, trigger when the device's VID first becomes non-zero."
+}
+
+# ---- capture 4: the host transmits -- what does it actually send? ---------------------------
+# Fires on the first K the HOST drives (oe=1, D+ low, D- high). Every packet's SYNC starts with K,
+# so this lands on real data and skips the bus reset, which is a long SE0 (both low) that would
+# otherwise fill the whole 42us window. Trigger position is early, so most of the buffer is what
+# follows: the full host packet (decodable at 5 samples per bit for full speed, 40 for low speed), then the gap in which the device
+# should answer. Added after a snapshot showed the core parked at a `start` instruction -- i.e.
+# waiting for a reply that never came -- straight after an `outb`.
+proc usb_arm_host {{port 1}} {
+    set ila [_uila]
+    _ureset
+    set_property TRIGGER_COMPARE_VALUE eq1'b1 [_up usb_oe_port${port}]
+    set_property TRIGGER_COMPARE_VALUE eq1'b0 [_up usb_dp_out_port${port}]
+    set_property TRIGGER_COMPARE_VALUE eq1'b1 [_up usb_dm_out_port${port}]
+    set_property CONTROL.TRIGGER_POSITION 256 $ila
+    puts "Armed: port $port, trigger on the host driving its first K (start of a packet)."
+}
+
+# ---- capture 5: what the host did BEFORE the SETUP -- milliseconds of history ---------------
+# Storage-qualified on oe=1, so ONLY samples where the host is driving are stored and every idle gap
+# is skipped. With the trigger (the SETUP's first K) placed near the END of the buffer, the ~3900
+# samples before it are the most recent host-driven activity leading up to the SETUP: the tail of the
+# bus reset (a long run of SE0) and any keep-alive EOPs (SE0-SE0-J, ~24 samples each) sent between
+# the reset and the request. That answers the two questions left once the packets themselves were
+# verified byte-perfect: was there a proper bus reset, and was the bus kept alive afterwards? A
+# full-speed device suspends after 3ms of idle, and a suspended device does not ACK.
+# NOTE there are no timestamps across skipped gaps -- this shows ORDER and COUNT, not durations.
+# The trigger state (oe=1) is itself a qualified sample, as the storage-qualification rule requires.
+proc usb_arm_history {{port 1}} {
+    set ila [_uila]
+    _ureset
+    set_property TRIGGER_COMPARE_VALUE eq1'b1 [_up usb_oe_port${port}]
+    set_property TRIGGER_COMPARE_VALUE eq1'b0 [_up usb_dp_out_port${port}]
+    set_property TRIGGER_COMPARE_VALUE eq1'b1 [_up usb_dm_out_port${port}]
+    set_property CONTROL.CAPTURE_MODE BASIC $ila
+    set_property CONTROL.CAPTURE_CONDITION AND $ila
+    set_property CAPTURE_COMPARE_VALUE eq1'b1 [_up usb_oe_port${port}]
+    set_property CONTROL.TRIGGER_POSITION 3900 $ila
+    puts "Armed: port $port, storing only host-driven samples, trigger on the SETUP's first K."
+}
+
+# ---- snapshot: no trigger, just record both ports right now ---------------------------------
+# Every compare is don't-care, so the core triggers on the very first sample. Use it with the device
+# ALREADY plugged in to see the steady state of both ports at once: which lines are high, whether the
+# host core is driving (oe), and what the core's pc and connected flag are doing. This is what to run
+# when a real trigger never fires -- it shows why, instead of leaving you to infer it.
+proc usb_snapshot {} {
+    set ila [_uila]
+    _ureset
+    set_property CONTROL.TRIGGER_POSITION 0 $ila
+    # -trigger_now is the Hardware Manager's "Run Trigger Immediate". If this Vivado lacks the flag, a
+    # plain run still fires at once, because every compare above is don't-care.
+    if {[catch { run_hw_ila -trigger_now $ila }]} { run_hw_ila $ila }
+    usb_status
+    puts "Captured immediately. Now: usb_fetch <tag>"
 }
 
 # ---- run / status / fetch ----------------------------------------------------------------------
@@ -147,5 +226,5 @@ proc usb_fetch {{tag usb}} {
     puts "CSV written to: $csv"
 }
 
-puts "Loaded. Arm: usb_arm_activity | usb_arm_connect | usb_arm_error"
+puts "Loaded. Arm: usb_arm_attach | usb_arm_device | usb_arm_host | usb_arm_history | usb_arm_enum | usb_snapshot   (optional port: 1=KBD default, 0=MOUSE)"
 puts "       Run: usb_run -> (plug device in) -> usb_status -> usb_fetch <tag>"

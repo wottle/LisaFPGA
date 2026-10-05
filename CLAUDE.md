@@ -782,7 +782,7 @@ LGPL, which matters for how LisaFPGA itself is distributed.
 **Suggested first step if resumed:** bring up a host core + soft CPU and try enumerating a *directly attached
 full-speed* keyboard before touching hub support. That validates the no-series-resistor signal integrity question on
 the real board cheaply, and tells you early whether the physical layer is going to fight you.
-### IN PROGRESS: USB full-speed feasibility spike (2026-08-22)
+### USB full-speed feasibility spike (2026-08-22) -- CONCLUDED, see the next section
 
 **Note the section above is now historical background, not the current state.** The spike described as
 its "suggested first step" has been implemented and is waiting on a hardware run.
@@ -851,6 +851,134 @@ here.**
 none of. The spike exists to settle the physical-layer question before committing to the soft-CPU
 project — and to find out cheaply if the board itself rules it out.
 
+
+### USB: spike concluded, m1nl fork adopted (2026-10-04) -- integrated, built, low-speed regression PASSED
+
+**The spike's verdict.** On a full-speed build of the original core, ILA captures at the FPGA pins showed
+everything on the host side correct: attach detected, a 10ms bus reset, 40ms of keep-alives, then a SETUP
+transaction that decodes byte-perfect -- SETUP `2D 00 10` (address 0, endpoint 0, CRC5 `0x02`), then
+DATA0 `C3 80 06 00 02 00 00 18 00 A2 54` (GET_DESCRIPTOR, configuration, 24 bytes; CRC16 `0x54A2`
+recomputed independently and matching), at exactly 12.0000Mbps with every run an exact multiple of the
+bit time. Yet neither an Apple keyboard (whose built-in hub IS full speed) nor a USB flash drive plugged
+in with no cable ever sent an ACK. **Cause: the original microcode sends low-speed keep-alive EOPs, never
+SOF tokens, and full-speed devices need a SOF every 1ms.** Found by research, not by a build: the
+m1nl fork of the same core (below) documents exactly that requirement. Signal integrity was a credible
+suspect until the cable-less flash drive failed identically.
+
+**A real bug the spike found and fixed along the way:** the original core counts every real-time delay
+in clock cycles -- a fixed 12002-clock frame (1ms at 12MHz) and a 2^23-clock watchdog (~700ms). Clocked
+8x faster for full speed, the 10ms bus reset became 1.25ms and the watchdog 87ms. USB specifies those
+delays in absolute time, so they must not scale with bit rate. The m1nl core gets this right
+(`interval == (FULL_SPEED ? 60000 : 12000)`).
+
+**Rules learned the hard way during capture, all of which cost at least one round trip:**
+- **Reprogramming the FPGA always brings the emulated Lisa up switched OFF, and USB is held in reset
+  until it is switched on.** The cores' reset is the Lisa's `_RESET`, which is generated on `DOTCK`, which
+  the Lisa's power switch gates. Symptom: both ports frozen at `pc = 0` with the error flag pinned high.
+  Turn the Lisa on after every JTAG load before expecting any USB activity.
+- **USB1 is port 0** (the `MOUSE_DP/DN` connector) and **USB2 is port 1** (`KBD_DP/DN`).
+- **ILA probe names come from the source nets, not the packed bus names.** Concatenating signals into
+  an ILA input makes Vivado's `.ltx` name each bit after its net (`usb_dp_in_port1`, ...); the packed
+  names in `add_usb_ila.tcl` never exist at runtime.
+- **An empty USB port is not quiet**: both lines sit low on the 15k pull-downs, so "D+ is low" is
+  already true. Triggers must be conditions only a present device can create.
+- **After a fetch, Hardware Manager drops its probe association** and the next `run_hw_ila` fails with
+  "Use refresh_hw_device command, with a valid [debug_nets.ltx]". `capture_usb_ila.tcl` now does a full
+  refresh at the start of every arm (`_ureset`) -- but NOT in `usb_status`, where a full refresh could
+  knock an armed core out of its waiting state.
+- **Storage qualification gives milliseconds of history from a 4096-sample buffer**: qualify on
+  `oe = 1` and only host-driven samples are stored (`usb_arm_history`). That is how the reset and the
+  40 keep-alives were seen. It shows order and count, not durations.
+
+**The fork: [m1nl/usb_hid_host](https://github.com/m1nl/usb_hid_host)**, Apache-2.0, copyright
+nand2mario (2023) and Mateusz Nalewajski (2026); imported at commit `e492176`, files unmodified. One
+60MHz core detects per device whether it is full speed (5x oversampling) or low speed (a /5 prescaler
+giving 8x), sends SOF every 1ms at full speed, and is proven on hardware (EBAZ4205) with an 8BitDo
+controller, a Logitech keyboard and others. **No hub support** -- Apple keyboards with ports still will
+not work (see "Hub support" below).
+
+**Integration** (all in `top.sv` unless noted):
+- `usb_hid_host.v` and `usb_hid_host_rom.mem` replaced in place with the fork's. `usb_hid_host_rom.v`
+  keeps its filename (so the `.xpr` needs no edit) but now holds the fork's **dual-port** microcode ROM,
+  one read port per core, as in the fork's own `usb_hid_host_dual` reference design.
+- **Two clock domains.** The cores run on `usbclk_core`: 60MHz from `usb_fs_clock` when
+  `USB_FULL_SPEED = 1`, else the 12MHz from `clock_divider` (a low-speed-only fallback). The Lisa-protocol
+  modules `usb_keyboard_interface` / `usb_mouse_interface` stay on the **12MHz `usbclk`, untouched**,
+  because their timing is in 12MHz cycles (keyboard serial bit times 188/258/369, mouse quadrature step
+  6000) and at 60MHz the Lisa keyboard protocol would run 5x too fast.
+- Reports cross 60MHz -> 12MHz through **`xpm_cdc_handshake`** (the design's first use of XPM). Each
+  report is **latched on its `full_report` pulse** first, because the core's key/mouse outputs are a live
+  decode of a receive buffer that is rebuilt byte by byte as the next report arrives, then copied into a
+  transfer register so `src_in` stays stable for the whole handshake.
+- **The keyboard/mouse port is remembered**, not chosen from `typ` each cycle, so the empty report the
+  core sends on a connection error still reaches the Lisa and releases held keys on unplug.
+- **The core's reset is ACTIVE-HIGH** (the original's was active-low), synchronised into `usbclk_core`.
+- `key_0` feeds the Lisa side's single keycode; `mouse_btn` is 3 bits, zero-extended to the old 8.
+- ILA kept (same IP, same five probe widths). Its two 19-bit debug probes now carry each port's **VID**
+  (from `dbg_hid_regs`): non-zero means the device descriptor was read. `usb_arm_enum` triggers on it.
+- XDC: `usbclk_clock_divider` (the 12MHz) added, by exact name, to the async group with `usbclk_fs*`;
+  a false path into the new reset synchroniser's first stage.
+- `add_usb_fs_clock.tcl` retargeted to **60MHz** (900MHz VCO / 15 expected) with the same accuracy check.
+
+**To build and test:**
+1. `source tools/vivado_scripts/add_usb_fs_clock.tcl` -- reconfigures `usb_fs_clock` from 96 to 60MHz.
+   Check it reports OK.
+2. Build with `USB_FULL_SPEED = 1` (and `DEBUG_USB_ILA = 1` for bring-up). Verify `usbclk_fs*` resolves at
+   60MHz, `usbclk_clock_divider` exists, and no cross-domain rows appear between them.
+3. Program over JTAG, **turn the Lisa on**, then test:
+   - **Regression first: the low-speed Lenovo keyboard and mouse must still work** on both ports.
+   - Then a **full-speed HID device** -- a gaming keyboard or mouse, or a wireless receiver; Logitech
+     Unifying receivers are full speed. `usb_arm_enum` shows whether its VID is read.
+4. Only then restore production directives and consider the flash.
+
+**Build and first hardware results (2026-10-04).** Integrated build: 0 errors, WNS +0.245 / WHS +0.084, 0 failing
+setup/hold endpoints, only the 10 known 1080p60 pulse-width entries. `usbclk_fs_usb_fs_clock` = 60.000MHz,
+`usbclk_clock_divider` = 12.049MHz, no inter-clock rows for either. **Low-speed regression passed: the Lenovo
+keyboard and mouse work on both ports.** A wired full-speed gaming keyboard (via a USB-C-to-A cable) enumerated
+and typed -- the first full-speed device ever to work on this board -- but dropped keystrokes.
+
+**Dropped keystrokes = rollover, FIXED in `usb_keyboard_interface.sv` -- confirmed on hardware 2026-10-04 (the
+gaming keyboard no longer drops keys; the Lenovo is still fine).** The Lisa side
+only ever looked at the first keycode slot, `key1`: pressing a second key before releasing the first sent no
+release for the first and never sent the second at all. Low-speed keyboards are polled every 10ms, so a fast
+typist's overlaps were often missed between polls; full speed polls every 1ms and sees nearly all of them, which
+is why the Lenovo seemed fine and the gaming keyboard did not. Now:
+- All six keycodes cross the CDC (`kbd_hold` is 56 bits: `{modifiers, key_5..key_0}`) into a `keys_in[47:0]` port.
+- The decoder keeps `prev_keys[6]`, the set of keys the Lisa has been told are down, and compares **sets, not
+  slots** (a held key can move slots between reports). `HANDLE_REGULAR_SCAN` sends releases first, then presses,
+  one event at a time through the existing `lisa_keycode`/`FINISHED` handshake, re-diffing against the live
+  report on every pass so a report that lands mid-sequence is merged in rather than lost.
+- Reports whose first keycode is `0x01` (ErrorRollOver, too many keys) are ignored entirely; codes below `0x04`
+  are never treated as keys. Modifier handling and the serial timing are unchanged.
+- Verified in xsim (`xvlog`/`xelab`/`xsim` ship with Vivado; a 25ms testbench runs in seconds): rollover, a slot
+  swap (no events), ErrorRollOver (ignored) and three reports 10us apart all produce the correct sequence.
+- **Caps Lock was inverted -- a pre-existing upstream bug, now fixed (sim-verified, hardware test pending).**
+  Seen on hardware: the first press gave lower case. The handler toggles `caps_lock_state` on its first cycle but
+  rebuilt bit 7 from `~caps_lock_state` on every cycle, so once the toggle landed it sent the OPPOSITE of the new
+  state (caps on -> "Caps up"). Bit 7 now uses `~caps_lock_state` on the first cycle and `caps_lock_state` after.
+  The testbench shows `FD` (down) on the first press and `7D` (up) on the second.
+
+**Key repeat starts too soon when overclocked -- upstream behaviour, NOT a USB issue, left alone.** The Lenovo and
+the gaming keyboard both show it. The Lisa keyboard has no auto-repeat; the Lisa software repeats a held key and
+appears to time that in vertical-retrace ticks. LisaFPGA generates the Lisa's video timing, and so `_VSIR`, on
+`DOTCK` (`CPU_board.sv` ~line 1196), which the SPEED SELECT switches set to 20/40/60/75MHz -- so the retrace
+interrupt runs up to 3.75x faster (~225Hz) and every tick-timed delay shrinks to match. HDMI hides this because it
+has its own timing. Expected to be normal at stock 5MHz (not yet checked). Pinning the interrupt to 60Hz would
+decouple it from the video timing software expects -- the same class of overclock issue the README handles by
+patching MacWorks Plus rather than the hardware.
+
+**Keychron 2.4GHz receiver (VID 3434, PID D030) does not work, and is parked.** It is a composite device with four
+interfaces: MI_00 mouse, MI_01 game/vendor, MI_02 keyboard, MI_03 vendor. The core enumerates only the first
+interface, so it would find a mouse, not the keyboard; supporting it needs the microcode to pick the keyboard
+interface. The fork's README also lists composite receivers (8BitDo) as not working.
+
+**Hub support (the actual Apple-keyboard goal) remains a separate project.** It needs full speed (which
+this provides), then hub enumeration: address the hub, power its ports, poll its status endpoint, reset
+the port a device appears on, and enumerate that device at a second address. Either extend the microcode
+for one hub and one device, or run a C USB stack on a soft CPU. If the keyboard behind an Apple hub is
+**low speed**, the host must also send a PRE packet before each low-speed transaction -- neither core does
+that, so it would need RTL work in the bus engine. True high speed (480Mbps) is not an option and not
+needed: it requires an external ULPI PHY, and high-speed hubs fall back to full speed on a full-speed host.
 
 ### Parked: a second display, a 1920x1280 3:2 panel (10.5", HDMI driver board)
 

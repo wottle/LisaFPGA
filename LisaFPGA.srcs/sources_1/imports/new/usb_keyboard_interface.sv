@@ -24,7 +24,7 @@ module usb_keyboard_interface(
     input logic usbclk,
     input logic usbrst,
     input logic [7:0] key_modifiers_in,
-    input logic [7:0] key1_in,
+    input logic [47:0] keys_in, // All six keycodes of the boot report, {key_5 .. key_0}
     input logic report,
     input logic KBD_in,
     output logic KBD_out
@@ -37,20 +37,23 @@ module usb_keyboard_interface(
         KBD_in_sync <= KBD_in_int;
     end
 
-    // The latched versions of the key modifiers and key1
+    // The latched versions of the key modifiers and all six keycodes
     logic [7:0] key_modifiers;
-    logic [7:0] key1;
+    logic [7:0] keys [6];
 
     // Latch the key modifiers and keycodes on the rising edge of report
+    // A report whose first keycode is 0x01 (ErrorRollOver) means the keyboard has more keys down than it can
+    // report, and every keycode slot holds 0x01. It says nothing about which keys are actually held, so it is
+    // ignored outright -- treating it as "no keys" would release everything the user is holding.
     always_ff @(posedge usbclk, negedge usbrst) begin
         // On reset, clear all the latched values
         if (!usbrst) begin
             key_modifiers <= 8'b0;
-            key1 <= 8'b0;
-        end else if (report) begin
+            for (int i = 0; i < 6; i++) keys[i] <= 8'b0;
+        end else if (report && keys_in[7:0] != 8'h01) begin
             // If report is asserted, latch the key states
             key_modifiers <= key_modifiers_in;
-            key1 <= key1_in;
+            for (int i = 0; i < 6; i++) keys[i] <= keys_in[8*i +: 8];
         end
     end
 
@@ -235,10 +238,48 @@ module usb_keyboard_interface(
     // Another difference we need to account for:
     // The USB keyboard sends a keycode as long as the key is held down and then sends 0 when it's released
     // The Lisa keyboard protocol expects key press and key release to be separate events
-    // So we need to essentially detect edges on the key1 signal and only send the keycode when it rises (press) or falls (release)
-    // We'll do this by keeping track of the previous key1 value and comparing it to the current one
-    logic [7:0] prev_key1;
+    // So we need to detect which keys have appeared in or vanished from the report and send a press or release for each
+    // A USB boot report carries up to six keycodes at once, in no particular order, and a key that stays held
+    // can move between slots from one report to the next. So we compare SETS, not slots: prev_keys is the set
+    // of keys the Lisa has been told are down, and we send events one at a time until it matches the report.
+    // (Tracking only the first slot breaks on rollover -- pressing the next key before releasing the last
+    // produced no release at all, and the second key of an overlap was simply never sent. Full-speed
+    // keyboards poll every 1ms instead of 10ms, so they see far more overlaps and lost far more keys.)
+    logic [7:0] prev_keys [6];
     logic [7:0] prev_key_modifiers;
+
+    // The key currently being sent, and which prev_keys slot it is leaving or entering
+    logic [7:0] event_key;
+    logic [2:0] event_slot;
+
+    // Diff the report against prev_keys. Codes below 0x04 are not keys (0x00 empty, 0x01-0x03 error codes)
+    logic [5:0] key_released;   // prev_keys[i] is down as far as the Lisa knows, but no longer in the report
+    logic [5:0] key_pressed;    // keys[i] is in the report, but the Lisa hasn't been told about it yet
+    logic [5:0] slot_free;      // prev_keys[i] is empty and can take a newly pressed key
+    always_comb begin
+        for (int i = 0; i < 6; i++) begin
+            key_released[i] = (prev_keys[i] >= 8'h04);
+            key_pressed[i]  = (keys[i] >= 8'h04);
+            slot_free[i]    = (prev_keys[i] == 8'h00);
+            for (int j = 0; j < 6; j++) begin
+                if (prev_keys[i] == keys[j]) key_released[i] = 1'b0;
+                if (keys[i] == prev_keys[j]) key_pressed[i]  = 1'b0;
+            end
+        end
+    end
+
+    // Lowest-numbered slot in each of those masks
+    logic [2:0] release_idx, press_idx, free_idx;
+    always_comb begin
+        release_idx = 3'd0;
+        press_idx = 3'd0;
+        free_idx = 3'd0;
+        for (int i = 5; i >= 0; i--) begin
+            if (key_released[i]) release_idx = 3'(i);
+            if (key_pressed[i])  press_idx   = 3'(i);
+            if (slot_free[i])    free_idx    = 3'(i);
+        end
+    end
 
     // An enum for the states of each modifier key
     typedef enum logic [1:0] {
@@ -266,6 +307,7 @@ module usb_keyboard_interface(
         HANDLE_LEFT_OPTION,
         HANDLE_RIGHT_OPTION,
         HANDLE_APPLE,
+        HANDLE_REGULAR_SCAN,
         HANDLE_REGULAR_DOWN,
         HANDLE_REGULAR_UP
     } decoder_state_t;
@@ -277,8 +319,10 @@ module usb_keyboard_interface(
 
     always_ff @(posedge usbclk, negedge usbrst) begin
         if (!usbrst) begin
-            prev_key1 <= 8'd0;
+            for (int i = 0; i < 6; i++) prev_keys[i] <= 8'd0;
             prev_key_modifiers <= 8'd0;
+            event_key <= 8'd0;
+            event_slot <= 3'd0;
             caps_lock_state <= 1'b0;
             lisa_keycode <= 8'd0;
             kbd_reset_sequence <= 2'd0;
@@ -306,15 +350,15 @@ module usb_keyboard_interface(
                     // And clear the reset sequence counter
                     kbd_reset_sequence <= 2'd0;
                 end
-                // Also, clear prev_key1 and prev_key_modifiers to avoid spurious key events after reset
-                prev_key1 <= 8'd0;
+                // Also, clear prev_keys and prev_key_modifiers to avoid spurious key events after reset
+                for (int i = 0; i < 6; i++) prev_keys[i] <= 8'd0;
                 prev_key_modifiers <= 8'd0;
             end else begin
                 // Otherwise, handle key events as normal, which we do with a state machine
                 case (decoder_state)
                     WAIT: begin
-                        // In the idle state, we just wait until we see a change in key1 or the modifiers
-                        if (key1 != prev_key1 || key_modifiers != prev_key_modifiers) begin
+                        // In the idle state, we just wait until we see a change in the held keys or the modifiers
+                        if (key_released != 6'd0 || key_pressed != 6'd0 || key_modifiers != prev_key_modifiers) begin
                             // And then we move to HANDLE_SHIFT to start processing modifier keys
                             first_run <= 1'b1; // Set the first run flag
                             sent_keycode <= 1'b1; // Set the flag so we don't automatically fall through the shift handler
@@ -414,57 +458,72 @@ module usb_keyboard_interface(
                             sent_keycode <= 1'b1; // Set the flag so we don't automatically fall through next time
                             lisa_keycode <= 8'd0; // Clear lisa_keycode to indicate no key to send
                             // We're finally done with modifier keys, so move to handling regular keys
-                            // Decide whether it's a key down or key up event and go to the appropriate state
-                            if (key1 != 8'd0 && key1 != prev_key1) begin
-                                // Key down event
-                                decoder_state <= HANDLE_REGULAR_DOWN;
-                            end else if (key1 != prev_key1) begin
-                                // Key up event
-                                decoder_state <= HANDLE_REGULAR_UP;
-                                // No change in key1, just the modifiers, so nothing to do and go back and wait for the next event
-                            end else begin
-                                decoder_state <= WAIT;
-                                prev_key1 <= key1; // Don't forget to update prev_key1 here even if we don't actually do anything
-                            end
+                            decoder_state <= HANDLE_REGULAR_SCAN;
+                        end
+                    end
+                    HANDLE_REGULAR_SCAN: begin
+                        // Pick the next regular key event, one at a time, until prev_keys matches the report
+                        // Releases go first: that frees prev_keys slots for the presses, and it is the order a
+                        // real typist's rollover happens in anyway (the earlier key goes up as the next goes down)
+                        // The diff is re-evaluated against the live report on every pass, so a report that lands
+                        // mid-sequence is simply folded in rather than lost
+                        first_run <= 1'b1;
+                        sent_keycode <= 1'b1;
+                        if (key_released != 6'd0) begin
+                            event_key <= prev_keys[release_idx];
+                            event_slot <= release_idx;
+                            decoder_state <= HANDLE_REGULAR_UP;
+                        end else if (key_pressed != 6'd0) begin
+                            // A free slot always exists here: once every release has been sent, prev_keys holds
+                            // only keys that are still in the report, and the report has a key prev_keys lacks
+                            event_key <= keys[press_idx];
+                            event_slot <= free_idx;
+                            decoder_state <= HANDLE_REGULAR_DOWN;
+                        end else begin
+                            // Nothing left to send (or only the modifiers changed), so go back and wait for the next event
+                            decoder_state <= WAIT;
                         end
                     end
                     HANDLE_REGULAR_DOWN: begin
                         first_run <= 1'b0; // Clear the first run flag
                         // Handle regular key down event
-                        if (key1 == 8'h39) begin
+                        if (event_key == 8'h39) begin
                             // Caps Lock key pressed, toggle the caps_lock_state
                             if (first_run) begin
                                 // Make sure we only toggle it once per key press though
                                 caps_lock_state <= ~caps_lock_state;
                             end
-                            lisa_keycode <= lisa_keycode_hid[key1] | {~caps_lock_state, 7'b0000000}; // Set or clear bit 7 based on new caps lock state
+                            // Bit 7 must follow the NEW caps lock state (down = caps on). On the first cycle the toggle
+                            // above hasn't landed yet, so the new state is ~caps_lock_state; on every cycle after, it's
+                            // caps_lock_state itself. (Using ~caps_lock_state throughout sent the opposite state.)
+                            lisa_keycode <= lisa_keycode_hid[event_key] | {(first_run ? ~caps_lock_state : caps_lock_state), 7'b0000000};
                         end else begin
                             // For other keys, just set lisa_keycode normally
-                            lisa_keycode <= lisa_keycode_hid[key1] | 8'b10000000; // Set bit 7 to indicate key press
-                            if (lisa_keycode_hid[key1] != 8'd0) begin
+                            lisa_keycode <= lisa_keycode_hid[event_key] | 8'b10000000; // Set bit 7 to indicate key press
+                            if (lisa_keycode_hid[event_key] != 8'd0) begin
                                 // Only say that we sent something if lisa_keycode is valid; some keys may not have a mapping
                                 sent_keycode <= 1'b1; // Set the flag to say we sent something
                             end else begin
                                 sent_keycode <= 1'b0; // No valid keycode to send
                             end
                         end
-                        // Now go back to idle to wait for the next event once the keycode has been sent
+                        // Once the keycode has been sent, record the key as down and look for the next event
+                        // (unmapped keys are recorded too, so they don't get "pressed" again on every report)
                         if (kbd_state == FINISHED || !sent_keycode) begin
                             first_run <= 1'b1; // Set the first run flag again
                             sent_keycode <= 1'b1; // Set the flag so we don't automatically fall through next time
-                            prev_key1 <= key1; // Don't forget to update prev_key1 here
+                            prev_keys[event_slot] <= event_key;
                             lisa_keycode <= 8'd0; // Clear lisa_keycode to indicate no key to send
-                            decoder_state <= WAIT;
+                            decoder_state <= HANDLE_REGULAR_SCAN;
                         end
                     end
                     HANDLE_REGULAR_UP: begin
-                        // Handle a regular key up event
-                        // Look up the Lisa keycode for prev_key1
-                        if (prev_key1 != 8'h39) begin
+                        // Handle a regular key up event for event_key
+                        if (event_key != 8'h39) begin
                             // Only send release codes for non-Caps Lock keys
                             // For Caps Lock, we only care about the press event to toggle the state
-                            lisa_keycode <= lisa_keycode_hid[prev_key1] & 8'b01111111; // Clear bit 7 to indicate key release (should already be clear)
-                            if (lisa_keycode_hid[prev_key1] != 8'd0) begin
+                            lisa_keycode <= lisa_keycode_hid[event_key] & 8'b01111111; // Clear bit 7 to indicate key release (should already be clear)
+                            if (lisa_keycode_hid[event_key] != 8'd0) begin
                                 // Only say that we sent something if lisa_keycode is valid; some keys may not have a mapping
                                 sent_keycode <= 1'b1; // Set the flag to say we sent something
                             end else begin
@@ -473,12 +532,12 @@ module usb_keyboard_interface(
                         end else begin
                             sent_keycode <= 1'b0; // No valid keycode to send for Caps Lock release
                         end
-                        // Now that we've handled the key release, go back to WAIT once the keycode has been sent
+                        // Once the release has been sent, clear the key's slot and look for the next event
                         if (kbd_state == FINISHED || !sent_keycode) begin
                             sent_keycode <= 1'b1; // Set the flag so we don't automatically fall through next time
-                            prev_key1 <= key1; // Don't forget to update prev_key1 here
+                            prev_keys[event_slot] <= 8'd0;
                             lisa_keycode <= 8'd0; // Clear lisa_keycode to indicate no key to send
-                            decoder_state <= WAIT;
+                            decoder_state <= HANDLE_REGULAR_SCAN;
                         end
                     end
                     default: begin
