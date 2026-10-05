@@ -952,7 +952,7 @@ is why the Lenovo seemed fine and the gaming keyboard did not. Now:
   are never treated as keys. Modifier handling and the serial timing are unchanged.
 - Verified in xsim (`xvlog`/`xelab`/`xsim` ship with Vivado; a 25ms testbench runs in seconds): rollover, a slot
   swap (no events), ErrorRollOver (ignored) and three reports 10us apart all produce the correct sequence.
-- **Caps Lock was inverted -- a pre-existing upstream bug, now fixed (sim-verified, hardware test pending).**
+- **Caps Lock was inverted -- a pre-existing upstream bug, now fixed -- confirmed on hardware 2026-10-04.**
   Seen on hardware: the first press gave lower case. The handler toggles `caps_lock_state` on its first cycle but
   rebuilt bit 7 from `~caps_lock_state` on every cycle, so once the toggle landed it sent the OPPOSITE of the new
   state (caps on -> "Caps up"). Bit 7 now uses `~caps_lock_state` on the first cycle and `caps_lock_state` after.
@@ -963,7 +963,7 @@ the gaming keyboard both show it. The Lisa keyboard has no auto-repeat; the Lisa
 appears to time that in vertical-retrace ticks. LisaFPGA generates the Lisa's video timing, and so `_VSIR`, on
 `DOTCK` (`CPU_board.sv` ~line 1196), which the SPEED SELECT switches set to 20/40/60/75MHz -- so the retrace
 interrupt runs up to 3.75x faster (~225Hz) and every tick-timed delay shrinks to match. HDMI hides this because it
-has its own timing. Expected to be normal at stock 5MHz (not yet checked). Pinning the interrupt to 60Hz would
+has its own timing. **Confirmed: with the CPU dialled back, repeat is normal on both the Lenovo and the Keychron.** Pinning the interrupt to 60Hz would
 decouple it from the video timing software expects -- the same class of overclock issue the README handles by
 patching MacWorks Plus rather than the hardware.
 
