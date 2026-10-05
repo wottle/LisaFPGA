@@ -1006,8 +1006,8 @@ The receiver's mouse (interface 0) is not exposed: a port carries one device typ
 device means another VID/PID entry: read its descriptor the same way, compute the IN token CRC5 and the
 SET_PROTOCOL CRC16, and decide whether it needs `strict_boot`.
 
-**Logitech nano mouse receiver (VID 046D, PID C542; M185/M190 class) -- entry added 2026-10-05, hardware test
-pending.** Full speed, one interface (03/01/02 boot mouse), whose only IN endpoint is **`0x82`** -- so the same
+**Logitech nano mouse receiver (VID 046D, PID C542; M185/M190 class) -- WORKS (hardware-confirmed 2026-10-05,
+in the flashed production build).** Full speed, one interface (03/01/02 boot mouse), whose only IN endpoint is **`0x82`** -- so the same
 endpoint-1 assumption broke it. Interface 0 is already classified as a mouse and already receives SET_PROTOCOL, so
 the entry only sets the IN token to `01 C1` (endpoint 2). The interface also has a vendor collection (Logitech
 HID++); if HID++ notifications share the endpoint they would decode as a stray mouse movement. No filter was added
