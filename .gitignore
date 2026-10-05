@@ -43,3 +43,7 @@ LisaFPGA.runs/impl_1/tight_setup_hold_pins.txt
 
 # ILA capture exports from the settings-flash debugging (findings are written up in CLAUDE.md)
 ila_*.csv
+
+# RISC-V toolchain for the USB soft-CPU firmware (xPack riscv-none-elf-gcc, ~2GB unpacked). See
+# docs/usb_softcpu_host_design.md for the version and download source.
+/tools/toolchain/
