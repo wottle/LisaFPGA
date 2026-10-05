@@ -272,6 +272,13 @@ always @(*) begin
       strict_boot = 1'b1;  // interface 2 also carries consumer / system-control reports
     end  // LisaFPGA: Keychron 2.4GHz receiver -- descriptor read from the real device, CRCs checked against
          // the fork's known packets
+    {16'h046d, 16'hc542}: begin
+      in_payload[0] = 8'h01;   // IN endpoint 2 (01 c1): the only interface's boot mouse endpoint is 0x82
+      in_payload[1] = 8'hc1;
+
+      out_payload[0] = 8'h01;  // OUT endpoint 2 (01 c1) - default, unused
+      out_payload[1] = 8'hc1;
+    end  // LisaFPGA: Logitech nano receiver (M185/M190 class), full speed, single boot-mouse interface
     {16'h2dc8, 16'h301c},
     {16'h2dc8, 16'h310a}: begin
       in_payload[0] = 8'h01;   // IN endpoint 4 (01 ba)

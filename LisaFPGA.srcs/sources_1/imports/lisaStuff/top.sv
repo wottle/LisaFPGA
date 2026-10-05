@@ -217,11 +217,11 @@ module top(
     // Setting this to 1 requires tools/vivado_scripts/add_usb_fs_clock.tcl to have been run once (it
     // configures the usb_fs_clock IP for 60MHz), or synthesis fails with "module usb_fs_clock not
     // found". Re-run it if the IP still holds the 96MHz configuration from the earlier spike.
-    localparam logic USB_FULL_SPEED = 1'b1;   // <-- ON for the full-speed spike
+    localparam logic USB_FULL_SPEED = 1'b1;   // hardware-tested 2026-10-05: LS Lenovo, FS gaming keyboard, Keychron receiver
 
-    // Compiles an ILA capturing the raw USB lines and the host core's state, for the spike above.
+    // Compiles an ILA capturing the raw USB lines and each port's descriptor registers, for bring-up.
     // Requires tools/vivado_scripts/add_usb_ila.tcl to have been run once.
-    localparam logic DEBUG_USB_ILA = 1'b1;    // <-- ON for the full-speed spike
+    localparam logic DEBUG_USB_ILA = 1'b0;    // OFF for production; check WHS on any build that toggles it
 
     // The internal Verilog SCC is now working, so enable the transceivers that hook it to the serial bus instead of using the external SCC
     assign INTERNAL_SCC_EN = 1'b0;

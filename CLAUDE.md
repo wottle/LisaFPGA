@@ -1002,6 +1002,26 @@ The receiver's mouse (interface 0) is not exposed: a port carries one device typ
 device means another VID/PID entry: read its descriptor the same way, compute the IN token CRC5 and the
 SET_PROTOCOL CRC16, and decide whether it needs `strict_boot`.
 
+**Logitech nano mouse receiver (VID 046D, PID C542; M185/M190 class) -- entry added 2026-10-05, hardware test
+pending.** Full speed, one interface (03/01/02 boot mouse), whose only IN endpoint is **`0x82`** -- so the same
+endpoint-1 assumption broke it. Interface 0 is already classified as a mouse and already receives SET_PROTOCOL, so
+the entry only sets the IN token to `01 C1` (endpoint 2). The interface also has a vendor collection (Logitech
+HID++); if HID++ notifications share the endpoint they would decode as a stray mouse movement. No filter was added
+blind -- add one only if that is actually seen.
+
+**Production build (2026-10-05):** `DEBUG_USB_ILA = 0` and the `.xpr` back on default synthesis settings (Vivado
+rewrote `<Step Id="synth_design"/>` itself after `set_property ... FLATTEN_HIERARCHY rebuilt` / `DIRECTIVE
+Default`). Intended for the flash once it passes JTAG testing with all four devices.
+
+**Next: runtime detection vs. a soft CPU (decided: a soft CPU, on a new feature branch for hub support).**
+Discovering the interface and endpoint at attach time on the current core would mean reading the full configuration
+descriptor (the core reads at most 31 bytes per transfer; the Keychron's is 116), an RTL descriptor walker, checking
+each candidate's HID report descriptor for a Keyboard/Mouse application collection (the Keychron's interface 1 claims
+boot keyboard but is a barcode reader -- class codes alone pick the wrong one), CRC5/CRC16 in hardware, and room in a
+ROM with 12 nibbles free (removing the unused gamepad/X-Input code would buy some). It still could not do hubs. A soft
+CPU running a C USB host stack gets runtime detection, combo receivers and hubs from one design, so per-device entries
+remain the stopgap until then.
+
 **Hub support (the actual Apple-keyboard goal) remains a separate project.** It needs full speed (which
 this provides), then hub enumeration: address the hub, power its ports, poll its status endpoint, reset
 the port a device appears on, and enumerate that device at a second address. Either extend the microcode
