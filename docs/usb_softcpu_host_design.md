@@ -1,6 +1,6 @@
 # USB host on a soft CPU — design
 
-Branch `feature/usb-hub-support`. Status: **phases 0 and 1 done in simulation** (2026-10-05).
+Branch `feature/usb-hub-support`. Status: **phases 0-2 done in simulation; first hardware build next** (2026-10-05).
 
 ## Progress log
 - **Phase 0 (2026-10-05):** toolchain = xPack riscv-none-elf-gcc 15.2.0-1 (sha256 verified), unpacked to
@@ -27,6 +27,17 @@ Branch `feature/usb-hub-support`. Status: **phases 0 and 1 done in simulation** 
   **PRE is implemented but untested** -- it needs the hub model (phase 3).
   Out-of-context build of the CPU plus both engines on the real part: **2535 LUTs (302 of them distributed RAM
   for the packet buffers), 1129 FFs, 8 RAMB36, WNS +7.3 ns at 60 MHz**, no critical warnings.
+- **Phase 2, simulation (2026-10-05): firmware works end to end.** `tools/usb_fw`: `usb_xfer.c` (transactions,
+  control transfers with NAK/error retry and duplicate-packet handling), `usb_host.c` (root-port state machine:
+  100 ms debounce, 50 ms reset, 20 ms recovery; enumeration; HID interfaces chosen by report descriptor; boot
+  protocol; interrupt polling with data toggles; keyboards merged into one report stream, mice forwarded; the
+  hub driver, written but untested until phase 3). 5.5 KB of 30. `tb_fw.sv` runs the real firmware on the CPU
+  against a full-speed keyboard model and a low-speed mouse model: both enumerate, distinct addresses, boot
+  protocol, and every report arrives at the Lisa-side outputs exactly (Shift+a+b, rollover to b, release;
+  mouse button + motion, release). Takes ~4.5 min (240 ms of USB time, CPU simulated cycle by cycle).
+  Report output registers: `0x1000_0010`/`14` keyboard (writing `14` emits the report), `0x1000_0018` mouse.
+  `top.sv` gains `USB_HOST_SOFTCPU` (default 1): when set, `usb_softcpu` replaces both m1nl cores and its
+  reports feed the existing CDC unchanged; the ILA debug probe shows the firmware debug word.
 
 ## Goal
 

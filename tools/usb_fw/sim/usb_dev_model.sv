@@ -11,6 +11,7 @@
 `timescale 1ns/1ps
 module usb_dev_model #(
     parameter bit LS = 0,
+    parameter bit MOUSE = 0,                            // boot mouse instead of boot keyboard
     parameter string NAME = "dev"
 ) (
     inout wire dp,
@@ -47,16 +48,23 @@ module usb_dev_model #(
     // ---- descriptors ----
     byte dev_desc [18] = '{8'h12, 8'h01, 8'h10, 8'h01, 8'h00, 8'h00, 8'h00, 8'h08,
                            8'h34, 8'h12, 8'h78, 8'h56, 8'h00, 8'h01, 8'h00, 8'h00, 8'h00, 8'h01};
-    byte hid_report [] = '{8'h05, 8'h01, 8'h09, 8'h06, 8'hA1, 8'h01, 8'h05, 8'h07, 8'h19, 8'hE0,
+    byte hid_kbd [] = '{8'h05, 8'h01, 8'h09, 8'h06, 8'hA1, 8'h01, 8'h05, 8'h07, 8'h19, 8'hE0,
                            8'h29, 8'hE7, 8'h15, 8'h00, 8'h25, 8'h01, 8'h75, 8'h01, 8'h95, 8'h08,
                            8'h81, 8'h02, 8'h95, 8'h01, 8'h75, 8'h08, 8'h81, 8'h01, 8'h95, 8'h06,
                            8'h75, 8'h08, 8'h15, 8'h00, 8'h25, 8'h65, 8'h05, 8'h07, 8'h19, 8'h00,
                            8'h29, 8'h65, 8'h81, 8'h00, 8'hC0};
+    byte hid_mouse [] = '{8'h05, 8'h01, 8'h09, 8'h02, 8'hA1, 8'h01, 8'h09, 8'h01, 8'hA1, 8'h00,
+                            8'h05, 8'h09, 8'h19, 8'h01, 8'h29, 8'h03, 8'h15, 8'h00, 8'h25, 8'h01,
+                            8'h95, 8'h03, 8'h75, 8'h01, 8'h81, 8'h02, 8'h95, 8'h01, 8'h75, 8'h05,
+                            8'h81, 8'h01, 8'h05, 8'h01, 8'h09, 8'h30, 8'h09, 8'h31, 8'h15, 8'h81,
+                            8'h25, 8'h7F, 8'h75, 8'h08, 8'h95, 8'h02, 8'h81, 8'h06, 8'hC0, 8'hC0};
+    byte hid_report [] = MOUSE ? hid_mouse : hid_kbd;
+    localparam int RPT_LEN = MOUSE ? 3 : 8;
     byte cfg_desc [34];
     initial cfg_desc = '{8'h09, 8'h02, 8'h22, 8'h00, 8'h01, 8'h01, 8'h00, 8'hA0, 8'h32,
-                         8'h09, 8'h04, 8'h00, 8'h00, 8'h01, 8'h03, 8'h01, 8'h01, 8'h00,
+                         8'h09, 8'h04, 8'h00, 8'h00, 8'h01, 8'h03, 8'h01, MOUSE ? 8'h02 : 8'h01, 8'h00,
                          8'h09, 8'h21, 8'h10, 8'h01, 8'h00, 8'h01, 8'h22, 8'(hid_report.size()), 8'h00,
-                         8'h07, 8'h05, 8'h81, 8'h03, 8'h08, 8'h00, 8'h0A};
+                         8'h07, 8'h05, 8'h81, 8'h03, MOUSE ? 8'h04 : 8'h08, 8'h00, 8'h0A};
 
     // ---- CRCs, spec form ----
     function automatic logic [4:0] crc5(input logic [10:0] d);           // d[0] is sent first
@@ -284,7 +292,7 @@ module usb_dev_model #(
                             tx_handshake(8'h5A);
                             continue;
                         end
-                        resp = reports[0:7];
+                        resp = reports[0:RPT_LEN-1];
                         tx_data(ep1_toggle, resp);
                         wait_k(20, got);
                         if (!got) begin missing_acks++; continue; end

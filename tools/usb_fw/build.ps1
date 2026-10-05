@@ -14,7 +14,7 @@ Push-Location $PSScriptRoot
 try {
     $src = @('start.S') + (Get-ChildItem *.c | ForEach-Object Name)
     & $gcc -march=rv32ic -mabi=ilp32 -Os -ffreestanding -nostdlib -Wall -Wextra '-Wl,--gc-sections' '-Wl,--no-warn-rwx-segments' `
-        -ffunction-sections -fdata-sections -T link.ld '-Wl,-Map,build/fw.map' -o build/fw.elf @src
+        -ffunction-sections -fdata-sections -T link.ld '-Wl,-Map,build/fw.map' -o build/fw.elf @src -lgcc
     if ($LASTEXITCODE) { throw 'compile failed' }
     & $objcopy -O binary build/fw.elf build/fw.bin
     if ($LASTEXITCODE) { throw 'objcopy failed' }

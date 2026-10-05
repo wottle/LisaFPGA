@@ -7,6 +7,9 @@
 //   0x1000_0000                 W  debug word (dbg_word output)
 //   0x1000_0004                 R  free-running microsecond counter
 //   0x1000_0008                 W  console byte (simulation only: printed with $write)
+//   0x1000_0010                 W  keyboard keys 0-3 (key_0 in [7:0])
+//   0x1000_0014                 W  [7:0] key_4, [15:8] key_5, [23:16] modifiers; writing it emits the report
+//   0x1000_0018                 W  mouse: [2:0] buttons, [15:8] dx, [23:16] dy; writing it emits the report
 //   0x1000_1000 - 0x1000_10FF   usb_sie, port 0 (registers: see usb_sie.sv)
 //   0x1000_2000 - 0x1000_20FF   usb_sie, port 1
 // ---------------------------------------------------------------------------------------------
@@ -22,6 +25,11 @@ module usb_softcpu #(
     output logic [1:0]  usb_dp_o,
     output logic [1:0]  usb_dm_o,
     output logic [1:0]  usb_oe,
+    // Reports for the Lisa side, as the old core produced them: data plus a one-cycle pulse
+    output logic        kbd_report,
+    output logic [55:0] kbd_data,        // {modifiers, key_5 .. key_0}
+    output logic        mouse_report,
+    output logic [18:0] mouse_data,      // {buttons[2:0], dx, dy}
     output logic [31:0] dbg_word
 );
     localparam RAM_WORDS = 8192;
@@ -111,10 +119,16 @@ module usb_softcpu #(
     // ---- MMIO ----
     logic [31:0] mmio_q;
     always_ff @(posedge clk) begin
-        if (reset) dbg_word <= '0;
-        else if (bus_wr && sel_mmio && mem_addr[15:12] == 4'h0) begin
+        kbd_report   <= 1'b0;
+        mouse_report <= 1'b0;
+        if (reset) begin
+            dbg_word <= '0; kbd_data <= '0; mouse_data <= '0;
+        end else if (bus_wr && sel_mmio && mem_addr[15:12] == 4'h0) begin
             case (mem_addr[7:0])
                 8'h00: dbg_word <= mem_wdata;
+                8'h10: kbd_data[31:0] <= mem_wdata;
+                8'h14: begin kbd_data[55:32] <= mem_wdata[23:0]; kbd_report <= 1'b1; end
+                8'h18: begin mouse_data <= {mem_wdata[2:0], mem_wdata[15:8], mem_wdata[23:16]}; mouse_report <= 1'b1; end
                 // synthesis translate_off
                 8'h08: $write("%c", mem_wdata[7:0]);
                 // synthesis translate_on

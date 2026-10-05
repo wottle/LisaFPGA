@@ -219,6 +219,12 @@ module top(
     // found". Re-run it if the IP still holds the 96MHz configuration from the earlier spike.
     localparam logic USB_FULL_SPEED = 1'b1;   // hardware-tested 2026-10-05: LS Lenovo, FS gaming keyboard, Keychron receiver
 
+    // 1 = the soft-CPU USB host (usb_softcpu: PicoRV32 + usb_sie packet engines + C firmware from
+    //     tools/usb_fw), which adds hub support and picks HID interfaces at runtime. 0 = the m1nl
+    //     microcode cores above, the hardware-proven fallback. See docs/usb_softcpu_host_design.md.
+    // Requires USB_FULL_SPEED = 1 (it runs on the 60MHz usbclk_core).
+    localparam logic USB_HOST_SOFTCPU = 1'b1;
+
     // Compiles an ILA capturing the raw USB lines and each port's descriptor registers, for bring-up.
     // Requires tools/vivado_scripts/add_usb_ila.tcl to have been run once.
     localparam logic DEBUG_USB_ILA = 1'b0;    // OFF for production; check WHS on any build that toggles it
@@ -1086,7 +1092,36 @@ module top(
     logic [3:0] usb_rom_dout_port0, usb_rom_dout_port1;
     logic       usb_rom_en_port0,   usb_rom_en_port1;
 
+    // Soft-CPU host outputs: reports already in the Lisa side's format, plus the firmware's debug word
+    logic        sc_kbd_report, sc_mouse_report;
+    logic [55:0] sc_kbd_data;
+    logic [18:0] sc_mouse_data;
+    logic [31:0] sc_dbg;
+
     `ifndef SIMULATION
+    generate
+    if (USB_HOST_SOFTCPU) begin : g_usb_softcpu
+        // Both ports belong to one CPU, which also tracks every device behind any hub on them. The
+        // firmware image is tools/usb_fw's build output (usb_host_fw.mem, a project source file).
+        usb_softcpu #(.FIRMWARE("usb_host_fw.mem"), .CLK_MHZ(60)) usb_host (
+            .clk(usbclk_core), .reset(usb_core_rst),
+            .usb_dp_i({usb_dp_in_port1, usb_dp_in_port0}), .usb_dm_i({usb_dm_in_port1, usb_dm_in_port0}),
+            .usb_dp_o({usb_dp_out_port1, usb_dp_out_port0}), .usb_dm_o({usb_dm_out_port1, usb_dm_out_port0}),
+            .usb_oe({usb_oe_port1, usb_oe_port0}),
+            .kbd_report(sc_kbd_report), .kbd_data(sc_kbd_data),
+            .mouse_report(sc_mouse_report), .mouse_data(sc_mouse_data),
+            .dbg_word(sc_dbg)
+        );
+        // the per-port signals of the m1nl cores, which this build does not have
+        assign {usb_typ_port0, usb_typ_port1, usb_report_port0, usb_report_port1} = '0;
+        assign {usb_conerr_port0, usb_conerr_port1, usb_key_modifiers_port0, usb_key_modifiers_port1} = '0;
+        assign {usb_keys_port0, usb_keys_port1, usb_mouse_btn_port0, usb_mouse_btn_port1} = '0;
+        assign {usb_mouse_dx_port0, usb_mouse_dx_port1, usb_mouse_dy_port0, usb_mouse_dy_port1} = '0;
+        assign usb_regs_port0 = {32'd0, sc_dbg};      // the ILA's debug probe shows the firmware's debug word
+        assign usb_regs_port1 = '0;
+    end else begin : g_usb_m1nl
+        assign {sc_kbd_report, sc_mouse_report, sc_kbd_data, sc_mouse_data, sc_dbg} = '0;
+
         usb_hid_host_dual_rom usb_ucode_rom (
             .clk(usbclk_core),
             .addra(usb_rom_addr_port0), .douta(usb_rom_dout_port0), .ena(usb_rom_en_port0),
@@ -1122,6 +1157,8 @@ module top(
             .dbg_hid_report(), .dbg_hid_regs(usb_regs_port1),
             .rom_addr(usb_rom_addr_port1), .rom_dout(usb_rom_dout_port1), .rom_en(usb_rom_en_port1)
         );
+    end
+    endgenerate
     `endif
 
     // ---------------------------------------------------------------------------------------------
@@ -1164,8 +1201,9 @@ module top(
     end
 
     logic kbd_report_core, mouse_report_core;
-    assign kbd_report_core   = kbd_port   ? usb_report_port1 : usb_report_port0;
-    assign mouse_report_core = mouse_port ? usb_report_port1 : usb_report_port0;
+    // (The soft-CPU host has already merged every keyboard and mouse it found into one stream each.)
+    assign kbd_report_core   = USB_HOST_SOFTCPU ? sc_kbd_report   : kbd_port   ? usb_report_port1 : usb_report_port0;
+    assign mouse_report_core = USB_HOST_SOFTCPU ? sc_mouse_report : mouse_port ? usb_report_port1 : usb_report_port0;
 
     // Latch each complete report on its full_report pulse. The core's key/mouse outputs are a live
     // decode of its receive buffer, which is rebuilt byte by byte while the NEXT report arrives, so
@@ -1178,10 +1216,12 @@ module top(
             mouse_hold <= '0;
         end else begin
             if (kbd_report_core)
-                kbd_hold <= kbd_port ? {usb_key_modifiers_port1, usb_keys_port1}
+                kbd_hold <= USB_HOST_SOFTCPU ? sc_kbd_data :
+                            kbd_port ? {usb_key_modifiers_port1, usb_keys_port1}
                                      : {usb_key_modifiers_port0, usb_keys_port0};
             if (mouse_report_core)
-                mouse_hold <= mouse_port ? {usb_mouse_btn_port1, usb_mouse_dx_port1, usb_mouse_dy_port1}
+                mouse_hold <= USB_HOST_SOFTCPU ? sc_mouse_data :
+                              mouse_port ? {usb_mouse_btn_port1, usb_mouse_dx_port1, usb_mouse_dy_port1}
                                          : {usb_mouse_btn_port0, usb_mouse_dx_port0, usb_mouse_dy_port0};
         end
     end
