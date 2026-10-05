@@ -7,6 +7,8 @@
 //   0x1000_0000                 W  debug word (dbg_word output)
 //   0x1000_0004                 R  free-running microsecond counter
 //   0x1000_0008                 W  console byte (simulation only: printed with $write)
+//   0x1000_1000 - 0x1000_10FF   usb_sie, port 0 (registers: see usb_sie.sv)
+//   0x1000_2000 - 0x1000_20FF   usb_sie, port 1
 // ---------------------------------------------------------------------------------------------
 module usb_softcpu #(
     parameter FIRMWARE = "usb_host_fw.mem",
@@ -14,6 +16,12 @@ module usb_softcpu #(
 ) (
     input  logic        clk,
     input  logic        reset,           // active high, synchronous to clk
+    // USB pins, one bit per port (IOBUFs are in top.sv)
+    input  logic [1:0]  usb_dp_i,
+    input  logic [1:0]  usb_dm_i,
+    output logic [1:0]  usb_dp_o,
+    output logic [1:0]  usb_dm_o,
+    output logic [1:0]  usb_oe,
     output logic [31:0] dbg_word
 );
     localparam RAM_WORDS = 8192;
@@ -87,11 +95,24 @@ module usb_softcpu #(
             us_div <= us_div + 1;
     end
 
+    // ---- USB packet engines ----
+    wire        sel_sie0 = sel_mmio && mem_addr[15:12] == 4'h1;
+    wire        sel_sie1 = sel_mmio && mem_addr[15:12] == 4'h2;
+    wire        bus_wr   = mem_valid && !mem_ready && |mem_wstrb;
+    logic [31:0] sie_q [2];
+    for (genvar p = 0; p < 2; p++) begin : sie
+        usb_sie #(.CLK_MHZ(CLK_MHZ)) port (
+            .clk (clk), .reset (reset),
+            .bus_we (bus_wr && (p == 0 ? sel_sie0 : sel_sie1)), .bus_addr (mem_addr[7:0]),
+            .bus_wdata (mem_wdata), .bus_wstrb (mem_wstrb), .bus_rdata (sie_q[p]),
+            .dp_i (usb_dp_i[p]), .dm_i (usb_dm_i[p]), .dp_o (usb_dp_o[p]), .dm_o (usb_dm_o[p]), .oe (usb_oe[p]));
+    end
+
     // ---- MMIO ----
     logic [31:0] mmio_q;
     always_ff @(posedge clk) begin
         if (reset) dbg_word <= '0;
-        else if (mem_valid && !mem_ready && sel_mmio && |mem_wstrb) begin
+        else if (bus_wr && sel_mmio && mem_addr[15:12] == 4'h0) begin
             case (mem_addr[7:0])
                 8'h00: dbg_word <= mem_wdata;
                 // synthesis translate_off
@@ -108,11 +129,13 @@ module usb_softcpu #(
     end
 
     // ---- handshake: ready one cycle after valid; rdata muxed from whichever unit was addressed ----
-    logic sel_ram_q;
+    logic       sel_ram_q;
+    logic [1:0] sel_sie_q;
     always_ff @(posedge clk) begin
         if (reset) mem_ready <= 1'b0;
         else       mem_ready <= mem_valid && !mem_ready;
         sel_ram_q <= sel_ram;
+        sel_sie_q <= {sel_sie1, sel_sie0};
     end
-    assign mem_rdata = sel_ram_q ? ram_q : mmio_q;
+    assign mem_rdata = sel_ram_q ? ram_q : sel_sie_q[0] ? sie_q[0] : sel_sie_q[1] ? sie_q[1] : mmio_q;
 endmodule

@@ -1,6 +1,6 @@
 # USB host on a soft CPU — design
 
-Branch `feature/usb-hub-support`. Status: **phase 0 done in simulation** (2026-10-05).
+Branch `feature/usb-hub-support`. Status: **phases 0 and 1 done in simulation** (2026-10-05).
 
 ## Progress log
 - **Phase 0 (2026-10-05):** toolchain = xPack riscv-none-elf-gcc 15.2.0-1 (sha256 verified), unpacked to
@@ -12,6 +12,21 @@ Branch `feature/usb-hub-support`. Status: **phase 0 done in simulation** (2026-1
   `.xpr`. `updatemem` can only be tried once it is in a full bitstream.
   Gotcha already hit: the linker must 4-byte-align `__bss_start`; PicoRV32 with `CATCH_MISALIGN` traps on the
   start-up zeroing loop otherwise.
+- **Phase 1 (2026-10-05): `usb_sie.sv` passes in simulation.** `tools/usb_fw/sim/tb_sie.sv` drives two engines
+  through their registers against `usb_dev_model.sv`, a behavioural boot keyboard written independently of the
+  RTL (spec-form MSB-first CRCs against the engine's reflected ones; real-valued bit timing instead of a clock).
+  Port 0 full speed, port 1 low speed, each: attach + speed detect, bus reset, SOF / keep-alive,
+  GET_DESCRIPTOR device (multi-packet) and config (the spike's captured SETUP, CRC16 `A2 54`), SET_ADDRESS,
+  SET_CONFIGURATION, TIMEOUT to an absent address, STALL, NAK, an interrupt report, a corrupted CRC (reported,
+  not ACKed, and the device's retry is accepted), and 2000 back-to-back transactions with every SOF on time
+  (worst 40 ns from 1 ms; the spec allows 500). 26/26 checks, zero protocol errors seen by the model; runs in
+  ~15 s. `sh tools/usb_fw/sim/run.sh tb_sie`.
+  The first run found one real bug: after a reception it does not ACK (CRC error, bad PID, babble) the engine
+  started the next token at once, while the device was still inside its 16-18 bit-time handshake wait and
+  took the token for a handshake. The engine now holds the bus quiet for 24 bit times before reporting.
+  **PRE is implemented but untested** -- it needs the hub model (phase 3).
+  Out-of-context build of the CPU plus both engines on the real part: **2535 LUTs (302 of them distributed RAM
+  for the packet buffers), 1129 FFs, 8 RAMB36, WNS +7.3 ns at 60 MHz**, no critical warnings.
 
 ## Goal
 
