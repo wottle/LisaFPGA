@@ -68,6 +68,10 @@ Branch `feature/usb-hub-support`. Status: **working on hardware, hubs included; 
   read OK). **WNS +0.360 / WHS +0.076, 0 failing setup/hold endpoints**, only the 10 known 1080p60 pulse-width
   entries -- the 32 ps HDMI-menu miss from the fast build is gone. 22348 LUTs (35.3%), 41 BRAM tiles,
   BUFGCTRL 28/32.
+  **Flashed 2026-10-05** (3 MHz JTAG, `use_file`) and cold-booted from flash with the saved display settings intact.
+  **Last two hardware tests passed (2026-10-05), on the flashed production build:** the low-speed Lenovo mouse in
+  an Apple keyboard's socket works -- the **PRE path is now hardware-confirmed** -- and unplugging a device from a
+  hub socket while running is handled. Every item on the phase plan is now done on hardware.
 
 ## Goal
 
