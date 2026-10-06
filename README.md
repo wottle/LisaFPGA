@@ -11,12 +11,18 @@ This is the [wottle/LisaFPGA](https://github.com/wottle/LisaFPGA) fork of Alex's
 - Settings persistence in the configuration flash.
 - Alex's latest ESFloppy support.
 
+You don't need the Lisa Mini case to use it. If you just want the improved USB support (hubs, keyboards and mice), you can install this fork on any LisaFPGA board.
+
 To install it, clone this fork (not upstream) and run the programming script from the clone:
 ```
 git clone https://github.com/wottle/LisaFPGA.git
 cd LisaFPGA
 ./program_board.sh
 ```
+Before running the script:
+- Plug the board into your computer's USB port with a data-capable USB-C cable, and make sure the board's power switch is on.
+- Your computer may prompt you to allow the board's USB hub to connect. If it does, approve it. You may then need to unplug and reconnect the board before running the script.
+
 The script flashes whatever bitstream is in your checkout, so running it from this fork installs the fork's version. The ESProFile and ESFloppy ESP32 firmware is still downloaded from Alex's repos. See [Programming/Updating the Firmware](#programmingupdating-the-firmware) for details.
 
 # Start Here
