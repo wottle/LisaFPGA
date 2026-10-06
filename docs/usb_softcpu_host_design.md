@@ -1,6 +1,6 @@
 # USB host on a soft CPU — design
 
-Branch `feature/usb-hub-support`. Status: **working on hardware, hubs included (2026-10-05); production build next** (2026-10-05).
+Branch `feature/usb-hub-support`. Status: **working on hardware, hubs included; production build done (2026-10-05)** (2026-10-05).
 
 ## Progress log
 - **Phase 0 (2026-10-05):** toolchain = xPack riscv-none-elf-gcc 15.2.0-1 (sha256 verified), unpacked to
@@ -59,6 +59,15 @@ Branch `feature/usb-hub-support`. Status: **working on hardware, hubs included (
   A brownout, not USB logic. Its hub asks for 300 mA, switches power per port, and the board's keyboard-port
   VBUS is the main 5V rail with no current limiting. Possible firmware mitigation if needed: power the
   non-removable (built-in keyboard) port first and the external ports after a pause, to spread the inrush.
+- **Staggered hub port power (2026-10-05), in firmware:** per-port-switched hubs get the built-in
+  (DeviceRemovable) ports powered first, then each external port alone, bPwrOn2PwrGood + 20 ms apart; ganged
+  hubs get one request. tb_hub (hub model now marks port 2 built-in, like the aluminium keyboard) confirms
+  ports 2, 1, 3 at 173, 293, 413 ms. Cannot help the plug-in inrush of the hub itself, which happens before
+  any firmware runs. Adds ~0.36 s to a 3-port hub's start-up. Firmware 5652 bytes.
+- **Production build (2026-10-05):** default synthesis settings, firmware with staggered power (5652 bytes,
+  read OK). **WNS +0.360 / WHS +0.076, 0 failing setup/hold endpoints**, only the 10 known 1080p60 pulse-width
+  entries -- the 32 ps HDMI-menu miss from the fast build is gone. 22348 LUTs (35.3%), 41 BRAM tiles,
+  BUFGCTRL 28/32.
 
 ## Goal
 

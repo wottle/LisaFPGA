@@ -55,6 +55,10 @@ module tb_hub;
         check(hub.configured, $sformatf("hub enumerated and configured (address %0d)", hub.my_addr));
         check(kbd.boot_protocol, $sformatf("full-speed keyboard behind the hub enumerated (address %0d)", kbd.my_addr));
         check(mouse.boot_protocol, $sformatf("low-speed mouse behind the hub enumerated via PRE (address %0d)", mouse.my_addr));
+        check(hub.power_t[2] < hub.power_t[1] && hub.power_t[1] < hub.power_t[3] &&
+              hub.power_t[1] - hub.power_t[2] >= 100.0e6 && hub.power_t[3] - hub.power_t[1] >= 100.0e6,
+              $sformatf("ports powered one at a time, built-in port 2 first (ports 2, 1, 3 at %0.0f, %0.0f, %0.0f ms)",
+                        hub.power_t[2] / 1.0e6, hub.power_t[1] / 1.0e6, hub.power_t[3] / 1.0e6));
         check(hub.pre_packets > 0, $sformatf("hub saw %0d PRE packets", hub.pre_packets));
 
         kbd.queue_report('{8'h00, 8'h00, 8'h04, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00});

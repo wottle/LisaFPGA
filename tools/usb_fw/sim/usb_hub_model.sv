@@ -38,6 +38,7 @@ module usb_hub_model #(
     bit   powered [1:NPORTS], connected [1:NPORTS], enabled [1:NPORTS], port_ls [1:NPORTS];
     bit   c_conn [1:NPORTS], c_reset [1:NPORTS];
     realtime rst_until [1:NPORTS];
+    realtime power_t [1:NPORTS];                      // when each port was powered, for the testbench
     for (genvar p = 1; p <= NPORTS; p++) begin : dport
         assign ddp[p] = rst_drv[p] ? 1'b0 : down_fs[p] ? dp : down_ls[p] ? dm : 1'bz;
         assign ddm[p] = rst_drv[p] ? 1'b0 : down_fs[p] ? dm : down_ls[p] ? dp : 1'bz;
@@ -217,7 +218,7 @@ module usb_hub_model #(
     byte cfg_desc [25] = '{8'h09, 8'h02, 8'h19, 8'h00, 8'h01, 8'h01, 8'h00, 8'hA0, 8'h32,
                            8'h09, 8'h04, 8'h00, 8'h00, 8'h01, 8'h09, 8'h00, 8'h00, 8'h00,
                            8'h07, 8'h05, 8'h81, 8'h03, 8'h01, 8'h00, 8'h0C};
-    byte hub_desc [9]  = '{8'h09, 8'h29, 8'(NPORTS), 8'h0D, 8'h00, 8'h32, 8'h64, 8'h00, 8'hFF};
+    byte hub_desc [9]  = '{8'h09, 8'h29, 8'(NPORTS), 8'h0D, 8'h00, 8'h32, 8'h64, 8'h04, 8'hFF};   // port 2 non-removable, as on the aluminium Apple keyboard
 
     byte ctl [$];
     int  ctl_idx = 0;
@@ -249,7 +250,7 @@ module usb_hub_model #(
                     ch[0] = c_conn[p]; ch[4] = c_reset[p];
                     ctl = {st[7:0], st[15:8], ch[7:0], ch[15:8]};
                 end else if (s[1] == 8'h03) case (wvalue)                    // SET_PORT_FEATURE
-                    8:  powered[p] = 1;
+                    8:  if (!powered[p]) begin powered[p] = 1; power_t[p] = $realtime; end
                     4:  if (connected[p]) begin
                             rst_drv[p] = 1; enabled[p] = 0; rst_until[p] = $realtime + 10.0e6; resets++;
                         end

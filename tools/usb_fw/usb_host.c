@@ -250,10 +250,28 @@ static void hub_init(int idx, int ep, int interval) {
     int r = req(h, 0xA0, 6, 0x2900, 0, buf, 9);
     if (r < 7) { log_dev(h); log_str("hub descriptor failed\n"); return; }
     h->hub_ports = buf[2];
-    int pwr_ms = buf[5] * 2;
-    log_dev(h); log_str("hub, "); log_dec(h->hub_ports); log_str(" ports\n");
-    for (int p = 1; p <= h->hub_ports; p++) req(h, 0x23, 3, HUB_PORT_POWER, p, 0, 0);
-    delay_ms(pwr_ms + 20);
+    int pwr_ms  = buf[5] * 2 + 20;                       // bPwrOn2PwrGood, plus margin
+    int ganged  = (buf[3] & 3) == 0;                      // wHubCharacteristics: one switch for all ports
+    uint8_t fixed = r >= 8 ? buf[7] : 0;                  // DeviceRemovable: bit p = built-in device on port p
+    log_dev(h); log_str("hub, "); log_dec(h->hub_ports); log_str(ganged ? " ports, ganged power\n" : " ports\n");
+
+    // Port power, staggered to spread the inrush. Each port's device charges its capacitors the moment its
+    // power switch closes, and the board's USB VBUS is the main 5V rail with no current limiting: the
+    // aluminium Apple keyboard browned the board out on a weak supply. So power the built-in device (on an
+    // Apple keyboard, the keyboard itself) alone first, then each external socket alone, waiting each
+    // port's power-good time in between. A ganged hub switches everything at once, so one request does it.
+    if (ganged) {
+        req(h, 0x23, 3, HUB_PORT_POWER, 1, 0, 0);
+        delay_ms(pwr_ms);
+    } else {
+        for (int pass = 0; pass < 2; pass++)
+            for (int p = 1; p <= h->hub_ports; p++) {
+                int builtin = p < 8 && ((fixed >> p) & 1);
+                if (builtin != (pass == 0)) continue;
+                req(h, 0x23, 3, HUB_PORT_POWER, p, 0, 0);
+                delay_ms(pwr_ms);
+            }
+    }
     // the status endpoint can be as slow as 255 ms (Apple's older hub); poll it faster than that
     ep_add(idx, ep, EP_HUB, interval > 32 ? 32 : interval);
 }
