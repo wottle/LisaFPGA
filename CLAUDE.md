@@ -410,8 +410,9 @@ row is drawn inverted, and the box auto-centres for whichever mode is live.
   to do is gone. The save snapshot lives in a `start_save()` task shared by the SAVE SETTINGS row and adjust
   mode's OK. Also moved the `btn_sync` declaration above its first use: xvlog rejected the file before
   (Vivado synthesis tolerated it), so `HDMI_Interface.sv` can now be syntax-checked with xvlog.
-- **CPU SPEED replaced SCANLINES in the menu (2026-10-06). Speed changes confirmed on hardware 2026-10-07**
-  (save/power-cycle and SWITCHES hand-back not yet reported). That build missed timing by 27 ps on ONE path,
+- **CPU SPEED replaced SCANLINES in the menu (2026-10-06) -- FULLY CONFIRMED on hardware 2026-10-07 and FLASHED:**
+  speed changes, the saved speed surviving a power cycle, and the SCANLINES jumper still working. Production
+  build of `7419f0f`: WNS +0.343 / WHS +0.073, only the 10 known pulse-width entries. The build before it missed timing by 27 ps on ONE path,
   `video_mode_reg` -> `h_offset_1080p_reg` (the adjust arithmetic, 11 levels / 4 carry chains at 1080p60), now
   pipelined: `active_value_q`, `active_limit_q`, `next_value_q` -- see the comment above `next_value`. The new
   `speed_menu_int_reg[*]` false path was verified BY EFFECT: its paths are listed with slack inf.
