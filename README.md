@@ -7,6 +7,7 @@ The Apple Lisa computer implemented inside an FPGA!
 This is the [wottle/LisaFPGA](https://github.com/wottle/LisaFPGA) fork of Alex's LisaFPGA, built for the [Lisa Mini case](https://github.com/wottle/lisa-mini). On top of upstream it adds:
 - Image offset/alignment tuning and resolution modes, so the picture lands correctly in the case's screen opening.
 - An on-screen menu summoned by holding LEFT+RIGHT for about 3 seconds.
+- CPU speed selectable from the on-screen menu, overriding the SPEED SELECT switches and saved across power cycles.
 - A USB soft-CPU host with hub support, so keyboards and mice work through a USB hub.
 - Settings persistence in the configuration flash.
 - Alex's latest ESFloppy support.
