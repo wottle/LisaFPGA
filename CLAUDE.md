@@ -381,7 +381,7 @@ summon the menu, which is why it can reasonably be left enabled:
 | Menu open | move the highlight | activate the item | close menu |
 | Adjust on, menu closed | move the image | cycle axis then step size | open menu |
 
-Menu items: `RESOLUTION` (1080P30 / 1080P60 / 1024X768), `ADJUST IMAGE`, `SCANLINES`, `MAX CONTRAST`,
+Menu items: `RESOLUTION` (1080P30 / 1080P60 / 1024X768), `ADJUST HORIZ`, `ADJUST VERT`, `SCANLINES`, `MAX CONTRAST`,
 `SAVE SETTINGS`, `EXIT`. The selected
 row is drawn inverted, and the box auto-centres for whichever mode is live.
 - Each setting is a **toggle XORed onto the real input** (`mode_sel_eff`, `scanlines_eff`, `contrast_eff`), so the
@@ -399,6 +399,17 @@ row is drawn inverted, and the box auto-centres for whichever mode is live.
 - Whole thing costs ~700 LUTs over the pre-menu build (18333 -> 18933, 29.9%) and doesn't move timing.
 
 **Alignment tuning specifics** (the `ADJUST IMAGE` item):
+- **Reworked 2026-10-06, CONFIRMED on hardware the same day** (build WNS +0.060 / WHS +0.043, only the 10 known
+  1080p60 pulse-width entries): `ADJUST IMAGE` became two rows,
+  `ADJUST HORIZ` and `ADJUST VERT` (7 rows now; `ADJUST VERT` shows `NO ROOM` and does nothing where
+  `v_limit` is 0, i.e. 1080p with the H ROM). Selecting either closes the menu and drops straight into
+  adjusting that axis. **In adjust mode, OK saves the settings and brings the menu back** (highlight still on
+  the ADJUST row); LEFT+RIGHT held ~3s goes back to the menu WITHOUT saving. Step size is no longer a mode --
+  a held direction accelerates: a tap is 1px, repeat at 1px/frame after ~0.33s, 8px/frame after ~0.83s
+  (frame counts scale with the 30/60Hz frame rate, like the summon timer). The axis/step cycling that OK used
+  to do is gone. The save snapshot lives in a `start_save()` task shared by the SAVE SETTINGS row and adjust
+  mode's OK. Also moved the `btn_sync` declaration above its first use: xvlog rejected the file before
+  (Vivado synthesis tolerated it), so `HDMI_Interface.sv` can now be syntax-checked with xvlog.
 - The current offset is drawn as `X240C` style in the top-left: axis, three digits, then `C`/`F` for the step.
   Read the number off, bake it in, then turn the constant back off.
 - Buttons are sampled once per frame, which doubles as a ~16ms debounce; holding repeats at 60/sec.

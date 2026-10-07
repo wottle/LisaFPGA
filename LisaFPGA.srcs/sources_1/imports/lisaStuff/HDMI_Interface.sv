@@ -496,14 +496,18 @@ module HDMI_Interface #(
     // TEMPORARY: live image-alignment tuning via the ESFloppy buttons (ALIGNMENT_TUNING_MODE)
     // ------------------------------------------------------------------------------------------------------
     // Buttons are sampled once per frame, which doubles as a ~16ms debounce -- no separate debounce counter
-    // needed. Holding a button therefore repeats at the frame rate (60/sec), so a full 480px sweep takes about
-    // 8 seconds on the fine step and 1 second on the coarse one.
-    //   LEFT / RIGHT : move the image along the currently selected axis
-    //   OK           : cycles X-fine -> X-coarse -> Y-fine -> Y-coarse -> back
+    // needed. The axis is picked from the menu (ADJUST HORIZ / ADJUST VERT); the step size needs no mode,
+    // because a held direction accelerates, like a key repeat:
+    //   tap               : 1px
+    //   held ~0.33s       : 1px per frame
+    //   held ~0.5s more   : 8px per frame (a full 480px sweep then takes about a second)
+    //   OK                : save the settings and return to the menu
+    //   LEFT+RIGHT ~3s    : return to the menu WITHOUT saving (the new position stays until power-off)
     // Four registers: horizontal and vertical, each held separately per output mode, so flipping the jumper
     // never destroys a value tuned in the other mode.
     logic [10:0] h_offset_1080p, h_offset_1024, v_offset_1080p, v_offset_1024;
-    logic coarse_step = 1'b0;      // 0 = 1px per frame, 1 = 8px per frame
+    logic coarse_step;             // 0 = 1px per frame, 1 = 8px per frame: derived from how long it's held
+    logic [6:0] hold_frames = 7'd0; // frames a direction has been held in adjust mode, saturating
     logic axis_y = 1'b0;           // 0 = adjusting X, 1 = adjusting Y
     logic tuning_init_done = 1'b0;
     logic settings_valid_q = 1'b0;  // latched copy of settings_valid for the menu readout
@@ -518,19 +522,27 @@ module HDMI_Interface #(
     // through to the ESP32 as always) and nothing is drawn, so the board behaves exactly like a stock build.
     // Counting frames avoids a separate timer, but the frame rate varies by mode, so the target does too: 60Hz
     // for 1024x768 and 1080p60, 30Hz for the 1080p30 position.
-    //   LEFT+RIGHT held ~3s : open / close the menu
-    //   OK short press      : activate the highlighted menu item, or (menu closed, adjust on) cycle axis and step size
-    //   LEFT / RIGHT        : move the menu highlight, or (menu closed, adjust on) move the image
-    logic tuning_active = 1'b0;    // "ADJUST IMAGE" -- readout visible and LEFT/RIGHT move the picture
+    //   LEFT+RIGHT held ~3s : open / close the menu (from adjust mode: back to the menu without saving)
+    //   OK short press      : activate the highlighted menu item, or (adjust mode) save and return to the menu
+    //   LEFT / RIGHT        : move the menu highlight, or (adjust mode) move the image
+    logic tuning_active = 1'b0;    // adjust mode (ADJUST HORIZ / VERT): readout visible, LEFT/RIGHT move the picture
     logic menu_active = 1'b0;
     logic [2:0] menu_sel = 3'd0;
     logic summon_long_fired = 1'b0; // Set once the long press fires, so holding on doesn't toggle repeatedly
     logic [8:0] summon_frames = 9'd0;
     logic ok_pressed, summon_pressed, prev_left, prev_right, prev_ok;
     logic [8:0] long_press_target;
+    (* ASYNC_REG = "TRUE" *) logic [2:0] btn_int, btn_sync;   // declared before the assigns below that read it
     assign ok_pressed     = (btn_sync[1] == 1'b0); // Buttons are active low
     assign summon_pressed = (btn_sync[2] == 1'b0) && (btn_sync[0] == 1'b0); // LEFT and RIGHT held together
     assign long_press_target = (video_mode == 2'd0) ? 9'd90 : 9'd180; // ~3s: 1080p30 is 30Hz, the other two are 60Hz
+    // Adjust-mode key repeat, in frames for the same reason: repeat starts after ~0.33s, coarse after ~0.83s
+    logic [6:0] repeat_after, coarse_after;
+    logic move_now;
+    assign repeat_after = (video_mode == 2'd0) ? 7'd10 : 7'd20;
+    assign coarse_after = (video_mode == 2'd0) ? 7'd25 : 7'd50;
+    assign coarse_step  = hold_frames >= coarse_after;
+    assign move_now     = (hold_frames == 7'd0) || (hold_frames >= repeat_after); // first frame, then repeat
 
     // Runtime overrides for things that are otherwise jumper-only. Each is a toggle XORed onto the real input,
     // so the physical jumper still works and the menu just flips whatever it currently says.
@@ -572,7 +584,6 @@ module HDMI_Interface #(
         settings_save_done_sync <= settings_save_done_int;
     end
 
-    (* ASYNC_REG = "TRUE" *) logic [2:0] btn_int, btn_sync;
     logic prev_cy_zero, frame_tick;
     // Feedback for a repeat save. settings_valid_q is sticky -- it means "a valid block exists in flash" --
     // so once the first save lands the row reads SAVED forever and a second save produces no visible change,
@@ -593,6 +604,22 @@ module HDMI_Interface #(
             next_value = ((active_value + step_amount) < active_limit) ? (active_value + step_amount) : active_limit;
         end
     end
+
+    // SAVE SETTINGS, shared by the menu row and by OK in adjust mode. Snapshots the current values and asks
+    // the sysclk side to write them. Latching here rather than driving the bus straight from the live
+    // registers keeps it stable for the whole erase+program, which takes milliseconds -- far longer than a
+    // button press. Called only from the always_ff below, so these registers keep a single driver.
+    task automatic start_save();
+        settings_save_data <= {
+            {11'b0, 1'b1, video_mode, contrast_override_menu, scanlines_override},
+            {5'b0, v_offset_1024},
+            {5'b0, h_offset_1024},
+            {5'b0, v_offset_1080p},
+            {5'b0, h_offset_1080p}
+        };
+        settings_save_req <= 1'b1;
+        save_disp_cnt     <= 6'd30;  // ~0.5s at 60Hz, ~1s at 30Hz
+    endtask
 
     always_ff @(posedge clk_pixel) begin
         // Buttons come from the "user pressing things" domain, so synchronize before use
@@ -662,8 +689,15 @@ module HDMI_Interface #(
                 if (summon_pressed) begin
                     if (!summon_long_fired) begin
                         if (summon_frames >= long_press_target) begin
-                            menu_active <= ~menu_active;
-                            menu_sel <= 3'd0;
+                            if (tuning_active) begin
+                                // From adjust mode: back to the menu WITHOUT saving, highlight still on the
+                                // ADJUST row it came from. The new position stays live until power-off.
+                                tuning_active <= 1'b0;
+                                menu_active   <= 1'b1;
+                            end else begin
+                                menu_active <= ~menu_active;
+                                menu_sel    <= 3'd0;
+                            end
                             summon_long_fired <= 1'b1; // Wait for a release before this can fire again
                         end else begin
                             summon_frames <= summon_frames + 1'b1;
@@ -688,29 +722,26 @@ module HDMI_Interface #(
                                 else if (video_mode == 2'd1) video_mode <= OUTPUT_1024X768 ? 2'd2 : 2'd0;
                                 else                         video_mode <= 2'd0;
                             end
-                            3'd1: tuning_active <= ~tuning_active;                     // ADJUST IMAGE
-                            3'd2: scanlines_override <= ~scanlines_override;           // SCANLINES
-                            3'd3: contrast_override_menu <= ~contrast_override_menu;   // MAX CONTRAST
-                            3'd4: begin
-                                // SETTINGS: snapshot the current values and ask the sysclk side to write
-                                // them. Latching here rather than driving the bus straight from the live
-                                // registers keeps it stable for the whole erase+program, which takes
-                                // milliseconds -- far longer than a button press.
-                                settings_save_data <= {
-                                    {11'b0, 1'b1, video_mode, contrast_override_menu, scanlines_override},
-                                    {5'b0, v_offset_1024},
-                                    {5'b0, h_offset_1024},
-                                    {5'b0, v_offset_1080p},
-                                    {5'b0, h_offset_1080p}
-                                };
-                                settings_save_req <= 1'b1;
-                                save_disp_cnt     <= 6'd30;  // ~0.5s at 60Hz, ~1s at 30Hz
+                            // ADJUST HORIZ / ADJUST VERT: close the menu and drop straight into moving the
+                            // image on that axis. VERT does nothing where the image already fills the frame
+                            // height (1080p with the H ROM), and its row says NO ROOM.
+                            3'd1: begin
+                                axis_y <= 1'b0; tuning_active <= 1'b1; menu_active <= 1'b0;
                             end
+                            3'd2: if (v_limit != 11'd0) begin
+                                axis_y <= 1'b1; tuning_active <= 1'b1; menu_active <= 1'b0;
+                            end
+                            3'd3: scanlines_override <= ~scanlines_override;           // SCANLINES
+                            3'd4: contrast_override_menu <= ~contrast_override_menu;   // MAX CONTRAST
+                            3'd5: start_save();                                         // SAVE SETTINGS
                             default: menu_active <= 1'b0;                              // EXIT
                         endcase
                     end else if (tuning_active) begin
-                        // Menu closed and the adjust tool up: cycle axis then step size
-                        {axis_y, coarse_step} <= {axis_y, coarse_step} + 2'd1;
+                        // Adjust mode: OK means done. Save, and bring the menu back with the highlight still
+                        // on the ADJUST row, whose SAVE SETTINGS row then shows SAVING / SAVED.
+                        start_save();
+                        tuning_active <= 1'b0;
+                        menu_active   <= 1'b1;
                     end
                 end
 
@@ -719,22 +750,31 @@ module HDMI_Interface #(
                     // Suppressed while the LEFT+RIGHT summon chord is down, so starting or releasing that
                     // hold doesn't also nudge the highlight.
                     if (!summon_pressed && btn_sync[2] == 1'b0 && prev_left == 1'b1) begin
-                        menu_sel <= (menu_sel == 3'd0) ? 3'd5 : menu_sel - 1'b1;
+                        menu_sel <= (menu_sel == 3'd0) ? 3'd6 : menu_sel - 1'b1;
                     end else if (!summon_pressed && btn_sync[0] == 1'b0 && prev_right == 1'b1) begin
-                        menu_sel <= (menu_sel == 3'd5) ? 3'd0 : menu_sel + 1'b1;
+                        menu_sel <= (menu_sel == 3'd6) ? 3'd0 : menu_sel + 1'b1;
                     end
                 end else if (tuning_active && !summon_pressed) begin
+                    // Key repeat: count frames held (one direction at a time), move on the first frame and
+                    // then every frame once the repeat delay has passed; coarse_step follows the count.
+                    if (btn_sync[2] == 1'b0 || btn_sync[0] == 1'b0) begin
+                        if (hold_frames != 7'd127) hold_frames <= hold_frames + 1'b1;
+                    end else
+                        hold_frames <= 7'd0;
                     // Write the (possibly unchanged) value back to whichever register is selected.
                     // Gated on !summon_pressed so holding LEFT+RIGHT to summon the menu can't also walk
                     // the image to one edge over the course of the hold.
-                    if (axis_y) begin
-                        if (in_1024_mode) v_offset_1024  <= next_value;
-                        else              v_offset_1080p <= next_value;
-                    end else begin
-                        if (in_1024_mode) h_offset_1024  <= next_value;
-                        else              h_offset_1080p <= next_value;
+                    if (move_now) begin
+                        if (axis_y) begin
+                            if (in_1024_mode) v_offset_1024  <= next_value;
+                            else              v_offset_1080p <= next_value;
+                        end else begin
+                            if (in_1024_mode) h_offset_1024  <= next_value;
+                            else              h_offset_1080p <= next_value;
+                        end
                     end
-                end
+                end else
+                    hold_frames <= 7'd0;
             end
         end
         // If the jumper moved, re-clamp in case the new mode has less room than the stored value
@@ -1042,10 +1082,11 @@ module HDMI_Interface #(
     function automatic logic [127:0] menu_label(input int i);
         case (i)
             0: menu_label = "RESOLUTION      ";
-            1: menu_label = "ADJUST IMAGE    ";
-            2: menu_label = "SCANLINES       ";
-            3: menu_label = "MAX CONTRAST    ";
-            4: menu_label = "SAVE SETTINGS   ";
+            1: menu_label = "ADJUST HORIZ    ";
+            2: menu_label = "ADJUST VERT     ";
+            3: menu_label = "SCANLINES       ";
+            4: menu_label = "MAX CONTRAST    ";
+            5: menu_label = "SAVE SETTINGS   ";
             default: menu_label = "EXIT            ";
         endcase
     endfunction
@@ -1059,13 +1100,14 @@ module HDMI_Interface #(
             6: menu_value = "   SAVED"; // A valid settings block was found in flash
             7: menu_value = " DEFAULT"; // Blank or bad checksum -- compile-time defaults in use
             8: menu_value = "  SAVING"; // Transient, held briefly so a repeat save is visible
+            9: menu_value = " NO ROOM"; // ADJUST VERT where the image already fills the frame height
             default: menu_value = "        ";
         endcase
     endfunction
 
     (* rom_style = "distributed" *) logic [7:0] font_rom   [0:511];
-    (* rom_style = "distributed" *) logic [5:0] label_rom  [0:95];  // 6 rows x 16 chars
-    (* rom_style = "distributed" *) logic [5:0] value_rom  [0:127]; // 16 slots x 8 chars (9 used)
+    (* rom_style = "distributed" *) logic [5:0] label_rom  [0:111]; // 7 rows x 16 chars
+    (* rom_style = "distributed" *) logic [5:0] value_rom  [0:127]; // 16 slots x 8 chars (10 used)
     logic [63:0] glyph_tmp;
     logic [127:0] label_tmp;
     logic [63:0] value_tmp;
@@ -1074,11 +1116,11 @@ module HDMI_Interface #(
             glyph_tmp = glyph_bits(g);
             for (int r = 0; r < 8; r = r + 1) font_rom[g*8 + r] = glyph_tmp[8*(7-r) +: 8];
         end
-        for (int i = 0; i < 6; i = i + 1) begin
+        for (int i = 0; i < 7; i = i + 1) begin
             label_tmp = menu_label(i);
             for (int j = 0; j < 16; j = j + 1) label_rom[i*16 + j] = ascii_glyph(label_tmp[8*(15-j) +: 8]);
         end
-        // Value strings: blank, 1080P30, 1024X768, ON, OFF, 1080P60, SAVED, DEFAULT, SAVING.
+        // Value strings: blank, 1080P30, 1024X768, ON, OFF, 1080P60, SAVED, DEFAULT, SAVING, NO ROOM.
         // Fill all 16 slots (menu_value's default is blank) so no index can read an uninitialised entry.
         for (int i = 0; i < 16; i = i + 1) begin
             value_tmp = menu_value(i);
@@ -1134,13 +1176,13 @@ module HDMI_Interface #(
         overlay_pixel <= font_rom[{ovl_glyph, ovl_dy[4:2]}][7 - ovl_dx[4:2]];
     end
 
-    // --- Menu: 24 chars x 5 rows at 2x scale => 384x80, centred for whichever mode is live ---
+    // --- Menu: 24 chars x 7 rows at 2x scale => 384x112, centred for whichever mode is live ---
     localparam int MENU_W = 384;
-    localparam int MENU_H = 96;  // 6 rows at 16px
+    localparam int MENU_H = 112; // 7 rows at 16px
     logic [11:0] menu_x;
     logic [10:0] menu_y;
     assign menu_x = in_1024_mode ? 12'd320 : 12'd768;
-    assign menu_y = in_1024_mode ? 11'd336 : 11'd492;  // (768-96)/2 and (1080-96)/2
+    assign menu_y = in_1024_mode ? 11'd328 : 11'd484;  // (768-112)/2 and (1080-112)/2
 
     logic menu_on, menu_pixel, menu_highlight;
     logic [11:0] mdx;
@@ -1168,11 +1210,12 @@ module HDMI_Interface #(
             // What the second mode actually IS depends on the build, so name it accordingly rather than
             // assuming 1024x768: a stock build's second position is 1080p60
             3'd0: m_vid = (video_mode == 2'd0) ? 4'd1 : (video_mode == 2'd1) ? 4'd5 : 4'd2; // 1080P30 / 1080P60 / 1024X768
-            3'd1: m_vid = tuning_active ? 4'd3 : 4'd4; // ON / OFF
-            3'd2: m_vid = scanlines_eff ? 4'd3 : 4'd4;
-            3'd3: m_vid = contrast_eff  ? 4'd3 : 4'd4;
+            3'd1: m_vid = 4'd0;                                   // ADJUST HORIZ: no value
+            3'd2: m_vid = (v_limit == 11'd0) ? 4'd9 : 4'd0;       // ADJUST VERT: NO ROOM where it can't move
+            3'd3: m_vid = scanlines_eff ? 4'd3 : 4'd4;
+            3'd4: m_vid = contrast_eff  ? 4'd3 : 4'd4;
             // SAVING wins over both, so a repeat save on an already-saved board still shows something happening
-            3'd4: m_vid = save_active ? 4'd8 : (settings_valid_q ? 4'd6 : 4'd7);
+            3'd5: m_vid = save_active ? 4'd8 : (settings_valid_q ? 4'd6 : 4'd7);
             default: m_vid = 4'd0;                        // EXIT has no value
         endcase
         // Columns 0-15 are the label, 16-23 the value (m_col[2:0] conveniently gives 0-7 there).
@@ -1185,7 +1228,7 @@ module HDMI_Interface #(
         hex_nib = jedec_id[hex_idx*4 +: 4];
         if (m_col < 5'd16) begin
             m_glyph = label_rom[{m_row, m_col[3:0]}];
-        end else if (m_row == 3'd4 && !settings_valid_q && !save_active) begin
+        end else if (m_row == 3'd5 && !settings_valid_q && !save_active) begin
             if (m_col[2:0] < 3'd2) m_glyph = 6'd10;                       // leading spaces
             else if (hex_nib < 4'd10) m_glyph = 6'(hex_nib);              // 0-9
             else m_glyph = 6'd12 + 6'(hex_nib) - 6'd10;                   // A-F
