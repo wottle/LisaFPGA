@@ -428,9 +428,19 @@ module top(
 
     // SPEED_SEL is in an unknown clock domain, so let's bring it into the dotck_20M domain before feeding it into the muxes
     // This should help to get rid of any noise from flipping the switches too
+    // The on-screen menu's CPU SPEED item can override the switches. cpu_speed_menu comes from HDMI_Interface
+    // ({menu owns it, speed index 0-3 = 5/10/15/18.75MHz}, pixel clock domain) through a two-stage synchroniser.
+    // A menu index is converted to switch polarity (~idx: both switches OFF = 2'b11 = 5MHz), so SPEED_SEL_dotck
+    // means the same thing either way -- and it is what CPU_board reports to Lisa software, so the speed the
+    // software reads is always the one actually running. A bit of the 3-bit value arriving a cycle before the
+    // others can only pick a neighbouring speed for one cycle, which the glitch-free BUFGMUXes absorb.
+    logic [2:0] cpu_speed_menu;
+    (* ASYNC_REG = "TRUE" *) logic [2:0] speed_menu_int, speed_menu_sync;
     logic [1:0] SPEED_SEL_dotck;
     always_ff @(posedge dotck_20M) begin
-        SPEED_SEL_dotck <= SPEED_SEL;
+        speed_menu_int  <= cpu_speed_menu;
+        speed_menu_sync <= speed_menu_int;
+        SPEED_SEL_dotck <= speed_menu_sync[2] ? ~speed_menu_sync[1:0] : SPEED_SEL;
     end
 
     // Use the first BUFGMUX to select between 20M and 40M
@@ -708,6 +718,7 @@ module top(
         .settings_save_done(settings_save_done),
         .settings_save_data(settings_save_data),
         .settings_save_req(settings_save_req),
+        .cpu_speed(cpu_speed_menu),
         .jedec_id(settings_dbg_word),
         .btn_left(LEFT_ESFLOPPY),
         .btn_ok(OK_ESFLOPPY),
@@ -814,7 +825,7 @@ module top(
         .CPU_ROM_SEL(CPU_ROM_SEL),
         .VA_overflow(VA_overflow),
         ._clr_vid_clk(_clr_vid_clk),
-        .SPEED_SEL(SPEED_SEL),
+        .SPEED_SEL(SPEED_SEL_dotck), // The effective speed: switches, or the menu's override
         .LisaFPGA_ID(LisaFPGA_ID),
         .LisaFPGA_Desktop(LisaFPGA_Desktop)
     );

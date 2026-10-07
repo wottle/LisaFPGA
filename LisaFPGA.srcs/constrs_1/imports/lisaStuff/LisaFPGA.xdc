@@ -263,6 +263,11 @@ set_false_path -to [get_pins dotck_mux_20M40M/CE*]
 set_false_path -to [get_pins dotck_mux_60M80M/CE*]
 set_false_path -to [get_pins dotck_final_mux/CE*]
 
+## The on-screen menu's CPU SPEED choice crosses from the HDMI pixel clock into dotck_20M through a two-stage
+## synchroniser in top.sv; its first stage is the async boundary. Verify this binds (the cell exists and the
+## pixel -> dotck_20M paths are gone from the timing report) rather than trusting the absence of a warning.
+set_false_path -to [get_cells {speed_menu_int_reg[*]}]
+
 ## We do use the framerate select signals in some other places though, so they're fed through synchronizers in those cases
 ## We need false paths for those too
 set_false_path -to [get_cells lisa_hdmi_output/framerate_sel_int_pixel_reg]

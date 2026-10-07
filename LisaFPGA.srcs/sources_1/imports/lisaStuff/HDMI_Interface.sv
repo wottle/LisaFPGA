@@ -39,6 +39,9 @@ module HDMI_Interface #(
     input logic        settings_save_done, // level from the sysclk side: the write finished
     output logic [79:0] settings_save_data = 80'd0, // snapshot taken when SAVE is picked, stable while saving
     output logic        settings_save_req = 1'b0,  // level: raised on SAVE, dropped once done
+    // The menu's CPU SPEED choice, clk_pixel domain: {menu owns it, speed index 0-3 = 5/10/15/18.75MHz}.
+    // Bit 2 low means "follow the SPEED SELECT switches". top.sv synchronises it into the dot clock domain.
+    output logic [2:0]  cpu_speed,
 
     // ESFloppy control buttons, active low. Only read when ALIGNMENT_TUNING_MODE is set; ignored otherwise.
     input logic btn_left,
@@ -546,8 +549,15 @@ module HDMI_Interface #(
 
     // Runtime overrides for things that are otherwise jumper-only. Each is a toggle XORed onto the real input,
     // so the physical jumper still works and the menu just flips whatever it currently says.
+    // Scanlines are jumper-only (SCANLINES); the menu row went to CPU SPEED. The override stays at 0 so the
+    // flags byte keeps its layout, and a block saved by an older build with this bit set is ignored on load.
     logic scanlines_override = 1'b0;
     logic contrast_override_menu = 1'b0;
+    // CPU SPEED: follows the SPEED SELECT switches until the menu picks a speed, then the menu owns it --
+    // the same pattern as RESOLUTION and the FRAMERATE jumper, so an untouched board behaves like stock.
+    logic       speed_user_set = 1'b0;
+    logic [1:0] speed_idx = 2'd0;   // 0-3 = 5 / 10 / 15 / 18.75MHz
+    assign cpu_speed = {speed_user_set, speed_idx};
     logic scanlines_eff, contrast_eff;
     assign scanlines_eff = scanlines ^ scanlines_override;
     assign contrast_eff  = cont_override ^ contrast_override_menu;
@@ -595,13 +605,25 @@ module HDMI_Interface #(
     assign save_active = settings_save_req || (save_disp_cnt != 6'd0);
     logic [10:0] step_amount, next_value;
     assign step_amount = coarse_step ? 11'd8 : 11'd1;
+    // PIPELINED. In one clock, video_mode -> the live mode's offset and limit -> add/subtract the step ->
+    // clamp -> write was 11 logic levels with 4 carry chains, and at 1080p60's 6.737ns it landed either side
+    // of the line depending on placement (+0.060ns, then -0.027ns on video_mode_reg -> h_offset_1080p_reg).
+    // Everything feeding it -- the offsets, the mode, the axis, the buttons, the hold count -- changes at most
+    // once per frame, and the result is only written on frame_tick, so registering the operands and then the
+    // result costs two clocks (~13ns) against a ~16.7ms frame: functionally invisible.
+    logic [10:0] active_value_q, active_limit_q, next_value_q;
+    always_ff @(posedge clk_pixel) begin
+        active_value_q <= active_value;
+        active_limit_q <= active_limit;
+        next_value_q   <= next_value;
+    end
     // What the selected register becomes after this frame's button state, saturating at both ends
     always_comb begin
-        next_value = active_value;
+        next_value = active_value_q;
         if (btn_sync[2] == 1'b0) begin          // LEFT: towards 0 (image moves left / up)
-            next_value = (active_value > step_amount) ? (active_value - step_amount) : 11'd0;
+            next_value = (active_value_q > step_amount) ? (active_value_q - step_amount) : 11'd0;
         end else if (btn_sync[0] == 1'b0) begin // RIGHT: towards the limit (image moves right / down)
-            next_value = ((active_value + step_amount) < active_limit) ? (active_value + step_amount) : active_limit;
+            next_value = ((active_value_q + step_amount) < active_limit_q) ? (active_value_q + step_amount) : active_limit_q;
         end
     end
 
@@ -611,7 +633,7 @@ module HDMI_Interface #(
     // button press. Called only from the always_ff below, so these registers keep a single driver.
     task automatic start_save();
         settings_save_data <= {
-            {11'b0, 1'b1, video_mode, contrast_override_menu, scanlines_override},
+            {8'b0, speed_user_set, speed_idx, 1'b1, video_mode, contrast_override_menu, scanlines_override},
             {5'b0, v_offset_1024},
             {5'b0, h_offset_1024},
             {5'b0, v_offset_1080p},
@@ -664,8 +686,13 @@ module HDMI_Interface #(
                     h_offset_1024  <= settings_data[42:32];
                     v_offset_1024  <= settings_data[58:48];
                     settings_valid_q       <= 1'b1;
-                    scanlines_override     <= settings_data[64];
                     contrast_override_menu <= settings_data[65];
+                    // A saved CPU speed takes over from the switches, as a saved resolution does from the
+                    // jumper. Blocks saved before this existed have bit 71 clear, so they keep the switches.
+                    if (settings_data[71]) begin
+                        speed_user_set <= 1'b1;
+                        speed_idx      <= settings_data[70:69];
+                    end
                     // A saved resolution takes over from the jumper, so a board wired to a 1024x768
                     // panel comes up in the right mode from cold without touching the menu
                     if (settings_data[68]) begin
@@ -731,7 +758,13 @@ module HDMI_Interface #(
                             3'd2: if (v_limit != 11'd0) begin
                                 axis_y <= 1'b1; tuning_active <= 1'b1; menu_active <= 1'b0;
                             end
-                            3'd3: scanlines_override <= ~scanlines_override;           // SCANLINES
+                            // CPU SPEED: SWITCHES -> 5 -> 10 -> 15 -> 18.75MHz -> back to SWITCHES. Takes
+                            // effect at once, exactly like flipping the switches on a running machine.
+                            3'd3: begin
+                                if (!speed_user_set)        begin speed_user_set <= 1'b1; speed_idx <= 2'd0; end
+                                else if (speed_idx == 2'd3) speed_user_set <= 1'b0;
+                                else                        speed_idx <= speed_idx + 1'b1;
+                            end
                             3'd4: contrast_override_menu <= ~contrast_override_menu;   // MAX CONTRAST
                             3'd5: start_save();                                         // SAVE SETTINGS
                             default: menu_active <= 1'b0;                              // EXIT
@@ -766,11 +799,11 @@ module HDMI_Interface #(
                     // the image to one edge over the course of the hold.
                     if (move_now) begin
                         if (axis_y) begin
-                            if (in_1024_mode) v_offset_1024  <= next_value;
-                            else              v_offset_1080p <= next_value;
+                            if (in_1024_mode) v_offset_1024  <= next_value_q;
+                            else              v_offset_1080p <= next_value_q;
                         end else begin
-                            if (in_1024_mode) h_offset_1024  <= next_value;
-                            else              h_offset_1080p <= next_value;
+                            if (in_1024_mode) h_offset_1024  <= next_value_q;
+                            else              h_offset_1080p <= next_value_q;
                         end
                     end
                 end else
@@ -1066,6 +1099,7 @@ module HDMI_Interface #(
             35: glyph_bits = 64'h66663C183C666600; //  X
             36: glyph_bits = 64'h66663C1818181800; //  Y
             37: glyph_bits = 64'h7E060C1830607E00; //  Z
+            38: glyph_bits = 64'h0000000000181800; //  .
             default: glyph_bits = 64'h0000000000000000; // space and unused slots
         endcase
     endfunction
@@ -1075,6 +1109,7 @@ module HDMI_Interface #(
         if (c >= "0" && c <= "9")      ascii_glyph = 6'(c - "0");
         else if (c >= "A" && c <= "Z") ascii_glyph = 6'(c - "A") + 6'd12;
         else if (c == ":")             ascii_glyph = 6'd11;
+        else if (c == ".")             ascii_glyph = 6'd38;
         else                           ascii_glyph = 6'd10; // space
     endfunction
 
@@ -1084,7 +1119,7 @@ module HDMI_Interface #(
             0: menu_label = "RESOLUTION      ";
             1: menu_label = "ADJUST HORIZ    ";
             2: menu_label = "ADJUST VERT     ";
-            3: menu_label = "SCANLINES       ";
+            3: menu_label = "CPU SPEED       ";
             4: menu_label = "MAX CONTRAST    ";
             5: menu_label = "SAVE SETTINGS   ";
             default: menu_label = "EXIT            ";
@@ -1101,13 +1136,18 @@ module HDMI_Interface #(
             7: menu_value = " DEFAULT"; // Blank or bad checksum -- compile-time defaults in use
             8: menu_value = "  SAVING"; // Transient, held briefly so a repeat save is visible
             9: menu_value = " NO ROOM"; // ADJUST VERT where the image already fills the frame height
+            10: menu_value = "SWITCHES"; // CPU SPEED: following the SPEED SELECT switches
+            11: menu_value = "    5MHZ"; // CPU SPEED chosen in the menu, 11 + speed index
+            12: menu_value = "   10MHZ";
+            13: menu_value = "   15MHZ";
+            14: menu_value = "18.75MHZ";
             default: menu_value = "        ";
         endcase
     endfunction
 
     (* rom_style = "distributed" *) logic [7:0] font_rom   [0:511];
     (* rom_style = "distributed" *) logic [5:0] label_rom  [0:111]; // 7 rows x 16 chars
-    (* rom_style = "distributed" *) logic [5:0] value_rom  [0:127]; // 16 slots x 8 chars (10 used)
+    (* rom_style = "distributed" *) logic [5:0] value_rom  [0:127]; // 16 slots x 8 chars (15 used)
     logic [63:0] glyph_tmp;
     logic [127:0] label_tmp;
     logic [63:0] value_tmp;
@@ -1120,7 +1160,8 @@ module HDMI_Interface #(
             label_tmp = menu_label(i);
             for (int j = 0; j < 16; j = j + 1) label_rom[i*16 + j] = ascii_glyph(label_tmp[8*(15-j) +: 8]);
         end
-        // Value strings: blank, 1080P30, 1024X768, ON, OFF, 1080P60, SAVED, DEFAULT, SAVING, NO ROOM.
+        // Value strings: blank, 1080P30, 1024X768, ON, OFF, 1080P60, SAVED, DEFAULT, SAVING, NO ROOM, and the
+        // five CPU SPEED values.
         // Fill all 16 slots (menu_value's default is blank) so no index can read an uninitialised entry.
         for (int i = 0; i < 16; i = i + 1) begin
             value_tmp = menu_value(i);
@@ -1212,7 +1253,7 @@ module HDMI_Interface #(
             3'd0: m_vid = (video_mode == 2'd0) ? 4'd1 : (video_mode == 2'd1) ? 4'd5 : 4'd2; // 1080P30 / 1080P60 / 1024X768
             3'd1: m_vid = 4'd0;                                   // ADJUST HORIZ: no value
             3'd2: m_vid = (v_limit == 11'd0) ? 4'd9 : 4'd0;       // ADJUST VERT: NO ROOM where it can't move
-            3'd3: m_vid = scanlines_eff ? 4'd3 : 4'd4;
+            3'd3: m_vid = speed_user_set ? (4'd11 + 4'(speed_idx)) : 4'd10; // CPU SPEED
             3'd4: m_vid = contrast_eff  ? 4'd3 : 4'd4;
             // SAVING wins over both, so a repeat save on an already-saved board still shows something happening
             3'd5: m_vid = save_active ? 4'd8 : (settings_valid_q ? 4'd6 : 4'd7);

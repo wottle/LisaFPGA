@@ -480,3 +480,6 @@ There are quite a lot of switches, jumpers, buttons, and LEDs on the LisaFPGA bo
 | OFF            | ON             | 10MHz           |
 | ON             | OFF            | 15MHz           |
 | ON             | ON             | 18.75MHz        |
+
+
+In builds with the on-screen menu (`ALIGNMENT_TUNING_MODE` in `top.sv`), the menu's CPU SPEED item can override these switches; set it back to SWITCHES to hand control back to them. A speed chosen there is kept by SAVE SETTINGS and applied at power-up.

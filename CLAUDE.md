@@ -410,6 +410,20 @@ row is drawn inverted, and the box auto-centres for whichever mode is live.
   to do is gone. The save snapshot lives in a `start_save()` task shared by the SAVE SETTINGS row and adjust
   mode's OK. Also moved the `btn_sync` declaration above its first use: xvlog rejected the file before
   (Vivado synthesis tolerated it), so `HDMI_Interface.sv` can now be syntax-checked with xvlog.
+- **CPU SPEED replaced SCANLINES in the menu (2026-10-06). Speed changes confirmed on hardware 2026-10-07**
+  (save/power-cycle and SWITCHES hand-back not yet reported). That build missed timing by 27 ps on ONE path,
+  `video_mode_reg` -> `h_offset_1080p_reg` (the adjust arithmetic, 11 levels / 4 carry chains at 1080p60), now
+  pipelined: `active_value_q`, `active_limit_q`, `next_value_q` -- see the comment above `next_value`. The new
+  `speed_menu_int_reg[*]` false path was verified BY EFFECT: its paths are listed with slack inf.
+  Row 3
+  cycles SWITCHES -> 5 -> 10 -> 15 -> 18.75MHZ -> SWITCHES; like RESOLUTION, it follows the physical switches until
+  the menu picks a speed. HDMI_Interface outputs `cpu_speed` = {menu owns it, index}; top.sv synchronises it into
+  dotck_20M (`speed_menu_int`/`speed_menu_sync`, false path on `speed_menu_int_reg[*]` in the XDC) and folds it
+  into `SPEED_SEL_dotck` as `~index` (switch polarity: both OFF = 2'b11 = 5MHz). `SPEED_SEL_dotck` now feeds BOTH
+  the clock muxes and CPU_board's status register, so Lisa software reads the speed actually running.
+  Saved in the settings flags byte: bits 70:69 index, bit 71 "speed valid" (older blocks have it clear and keep
+  the switches). Scanlines are now jumper-only; bit 64 is always saved as 0 and ignored on load. Added a `.`
+  glyph (slot 38) for "18.75MHZ".
 - The current offset is drawn as `X240C` style in the top-left: axis, three digits, then `C`/`F` for the step.
   Read the number off, bake it in, then turn the constant back off.
 - Buttons are sampled once per frame, which doubles as a ~16ms debounce; holding repeats at 60/sec.
