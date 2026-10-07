@@ -3,6 +3,28 @@ The Apple Lisa computer implemented inside an FPGA!
 
 <img width="1280" height="720" alt="IMG_4056" src="https://github.com/user-attachments/assets/5dabf7c8-afa6-4504-9d14-0c4098c217ed" />
 
+# About This Fork (Lisa Mini)
+This is the [wottle/LisaFPGA](https://github.com/wottle/LisaFPGA) fork of Alex's LisaFPGA, built for the [Lisa Mini case](https://github.com/wottle/lisa-mini). On top of upstream it adds:
+- Image offset/alignment tuning and resolution modes, so the picture lands correctly in the case's screen opening.
+- An on-screen menu summoned by holding LEFT+RIGHT for about 3 seconds.
+- A USB soft-CPU host with hub support, so keyboards and mice work through a USB hub.
+- Settings persistence in the configuration flash.
+- Alex's latest ESFloppy support.
+
+You don't need the Lisa Mini case to use it. If you just want the improved USB support (hubs, keyboards and mice), you can install this fork on any LisaFPGA board.
+
+To install it, clone this fork (not upstream) and run the programming script from the clone:
+```
+git clone https://github.com/wottle/LisaFPGA.git
+cd LisaFPGA
+./program_board.sh
+```
+Before running the script:
+- Plug the board into your computer's USB port with a data-capable USB-C cable, and make sure the board's power switch is on.
+- Your computer may prompt you to allow the board's USB hub to connect. If it does, approve it. You may then need to unplug and reconnect the board before running the script.
+
+The script flashes whatever bitstream is in your checkout, so running it from this fork installs the fork's version. The ESProFile and ESFloppy ESP32 firmware is still downloaded from Alex's repos. See [Programming/Updating the Firmware](#programmingupdating-the-firmware) for details.
+
 # Start Here
 Here are some links to different parts of this document depending on what you want to do:
 - [I bought a board and want to learn how to use it.](#using-it)
@@ -12,6 +34,7 @@ Here are some links to different parts of this document depending on what you wa
 - [I need troubleshooting help.](https://github.com/alexthecat123/LisaFPGA/FAQ.md)
 
 # Table of Contents
+- [About This Fork (Lisa Mini)](#about-this-fork-lisa-mini)
 - [Introduction](#introduction)
 - [Hardware](#hardware)
 - [Buying or Building a Board](#buying-or-building-a-board)
@@ -171,11 +194,12 @@ Either way, the process is identical, automated, and works on both macOS and Lin
 
 All you've got to do is open a Terminal on either macOS or Linux, use the ```cd``` command to move to the LisaFPGA directory, and then run the program_board.sh script.
 
-So assuming the LisaFPGA repo is in my Downloads folder, here's what this looks like:
+So assuming you cloned the LisaFPGA repo (use the [wottle fork](#about-this-fork-lisa-mini) for the Lisa Mini) into your Downloads folder, here's what this looks like:
 ```
-cd ~/Downloads/LisaFPGA-main/
+cd ~/Downloads/LisaFPGA/
 ./program_board.sh
 ```
+If you downloaded a ZIP from GitHub instead of cloning, the folder will be named `LisaFPGA-main` instead.
 
 Of course, make sure that you have your board plugged into your computer and powered on before you run the script! This script will automatically install all the necessary dependencies and do the following things to your board:
 - Programs the FT232H with the proper identity information to appear as a USB-to-JTAG interface.
