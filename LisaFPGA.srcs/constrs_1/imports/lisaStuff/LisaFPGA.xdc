@@ -582,6 +582,12 @@ set_property -dict {PACKAGE_PIN F4 IOSTANDARD LVCMOS33} [get_ports {GPIO[2]}]
 set_property -dict {PACKAGE_PIN D3 IOSTANDARD LVCMOS33} [get_ports {GPIO[3]}]
 set_property -dict {PACKAGE_PIN E3 IOSTANDARD LVCMOS33} [get_ports {GPIO[4]}]
 set_property -dict {PACKAGE_PIN D4 IOSTANDARD LVCMOS33} [get_ports {GPIO[5]}]
+## Per-pin pulls (they used to be one RTL PULLDOWN on the whole bus). [0]/[1] are jumper-to-3V3 inputs, so they keep
+## their pull-downs. [2]/[4] are WiFi-board outputs in ESP32 MODE = WIFI and tri-stated otherwise; a pull-down keeps them
+## where they always were. [3]/[5] are inputs FROM the WiFi board carrying serial data, so they idle at mark (high) when
+## no board is attached -- a pull-down there would look like a permanent break to the SCC and to ESFloppy.
+set_property PULLTYPE PULLDOWN [get_ports {GPIO[0] GPIO[1] GPIO[2] GPIO[4]}]
+set_property PULLTYPE PULLUP   [get_ports {GPIO[3] GPIO[5]}]
 
 ## Comms With External SCC
 set_property -dict {PACKAGE_PIN B2 IOSTANDARD LVCMOS33} [get_ports SCC_C4M]

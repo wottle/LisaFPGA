@@ -1,6 +1,6 @@
 # LisaFPGA — Project Notes for Claude
 
-## In progress: ESP32 WiFi mode ("LisaNet") — FPGA RTL written, NEVER COMPILED OR RUN (2026-10-10)
+## In progress: ESP32 WiFi mode ("LisaNet") — FPGA side BUILT, FLASHED AND HARDWARE-TESTED (2026-10-11); ESP32 firmware not started
 
 **Branch:** `feature/esp32-wifi-mode` (off `fork/main` @ `a01fff7`; worktree at `.worktrees/esp32-wifi` in the
 original checkout). **Spec: `docs/superpowers/specs/2026-10-10-esp32-wifi-mode-design.md`** — read it first.
@@ -40,6 +40,40 @@ Arduino core 3.3.12 with esptool 5.3.1 (`%LOCALAPPDATA%\Arduino15`). ESP32 ports
 can move. **Lesson: do not read ESProFile's flash with esptool unless you mean to.** A read resets the chip; one aborted
 read ("Packet content transfer stopped") left ESProFile unresponsive and the Lisa then hung at boot until ESProFile was
 reset by hand. ESFloppy is identified safely the same way, but leave ESProFile alone.
+**ESFloppy restored and the WiFi build flashed (2026-10-11).** ESFloppy: the 8 MB backup written back with esptool, hash
+verified. FPGA: `top.mcs` from this build written at 3 MHz JTAG with `use_file` (erase + program/verify OK), driven from
+batch Vivado on this machine -- no GUI needed. After a flash write the FPGA is running Vivado's flash loader, so a cold
+power cycle is needed to boot the new design. **Cold boot from flash: PASSED** -- the saved settings came back (so
+`use_file` left `0xC00000` alone), and **ESP32 MODE persists across a power cycle** (settings bit 72 works). Every FPGA-side
+step of the WiFi-mode brief is now done on hardware; what remains is the ESP32 WiFi firmware (open), flow control (O2)
+and the LisaNet Lisa app.
+**BLOCKER FOUND (2026-10-11): the rev 3 board's ESP32s have NO ANTENNA.** The phase-1 WiFi firmware (local repo
+`Development\ESFloppy`, upstream clone + `wifiMode.cpp/.h` + hooks in `ESFloppy_Main.cpp` and `SDTask.cpp`; uncommitted)
+works -- boot-time personality choice, MODE watcher with safe disk-image close, AT command set on Serial A -- and `AT`
+answers `OK` from LisaTerminal. But `AT+WSCAN` finds 0 networks, and the PCB netlist explains it: **pin 1 (`LNA_IN`, the
+ESP32-S3's only RF pin) has no net on either ESP32** -- U19 (ESFloppy, PCB id `e500`; its pins 39-44 are
+`FPGA_0..5_ESFLOPPY`) and U16 (ESProFile, `e497`). No antenna, no matching network, no trace: the radio cannot work on
+this board as built. Everything else in the WiFi-mode design (menu row, MODE line, Serial A mux, firmware personalities)
+is proven; only the RF path is missing. Options being considered: an external antenna-equipped ESP32 board on a spare
+header, an RS-232 WiFi modem on the physical Serial A, a bodge antenna on U19 pin 1, or an antenna on a future board rev.
+**Decision (2026-10-11): option B** -- an external XIAO ESP32S3 (antenna) on J21 does WiFi; ESFloppy's ESP32 becomes its
+SD-card server over a fast link wired through the FPGA (no SCC). J21 = 2x4: pin1 GPIO0, 2 GPIO4, 3 GPIO1, 4 GPIO5, 5 GPIO2,
+6 GND, 7 GPIO3, 8 3V3 (no 5V). WIFI-mode routing in `top.sv`: GPIO2 = SCC TXDA out, GPIO3 = into SCC RXDA (pull-up),
+GPIO4 = ESFLOPPY_COMM_BUS[5] passed out, GPIO5 = passed onto ESFLOPPY_COMM_BUS[4] (pull-up); none driven in FLOPPY mode.
+Protocol: `docs/lisanet_link_protocol.md` (framed, CRC-32, 4 KB blocks, LIST/STAT/OPEN/READ/WRITE/CLOSE/DELETE/RENAME/MKDIR/
+MOUNT_NEXT). ESFloppy side (`sdServer.cpp`, `lisanet.cpp/.h`, local repo only) serves it on the link UART (2 Mbaud) AND on
+its USB port; `tools/lisanet_client/lisanet.ps1` is a PC client. **Tested over USB on the real card:** download ~430 KB/s,
+upload ~160 KB/s, round trip byte-identical, every command works. Bugs found and fixed: USB TX and RX buffers too small for
+4 KB frames; receiver could stay stuck after a damaged frame (now resets after 100 ms of silence). Uploads use OPEN mode 3,
+which reserves contiguous space -- ESFloppy refuses fragmented images. **Mount-next works:** ESFloppy mounts the named
+image in drive 1 at every FLOPPY start-up until cleared (`/LISANET/MOUNTNXT.TXT`), and the Lisa saw the disk.
+**Floppy-path evidence from that test (the known floppy problem, not LisaNet):** the Lisa showed the disk named "I"; ejecting
+made LOS complain and hang (recovered by reset). Comparing the used copy with the original: the DC42 checksum (header
+72-75) plus 6 data sectors changed by 1-5 bytes each -- sector 28 (+312: 00->01), and sectors 39/41/42/43/44 all got the same
+4 bytes at +50..53 (-> `94 97 F1 00`, looks like a timestamp; +76 00->01 in 39/41); no tags changed. **So writes arrive
+intact and consistent.** Sector 28 is the volume record; its name field (offset 12) is "AOS 3.0"; "1000 Miles" is a
+directory entry in sector 43. "I" matches neither, and neither was damaged. The copy is kept on the card as
+`/LISANET/1000-miles-copy.dc42`; the original `/1000-miles.dc42` is untouched.
 **Pre-existing bug found, NOT fixed here (it is on `main` too):** `frame_width` is never declared in
 `HDMI_Interface.sv`, so its first use (the `cx_adj_comb` line-wrap compare) makes it an implicit **1-bit** net, and the
 `hdmi` core's 12-bit `frame_width` output connects only bit 0 (Synth 8-689). The pipeline-latency wrap therefore never

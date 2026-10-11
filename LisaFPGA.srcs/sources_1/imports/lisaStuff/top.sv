@@ -114,7 +114,9 @@ module top(
 
         input logic MOUSE_SEL,
 
-        (* PULLTYPE = "PULLDOWN" *) input logic [5:0] GPIO,
+        // J21 header. [0] spoof-88 and [1] max-contrast are jumper inputs; [5:2] carry the external WiFi board's links in
+        // ESP32 MODE = WIFI (see the ESP32 MODE block). Pull-ups/downs are per pin in the XDC.
+        inout logic [5:0] GPIO,
 
         input logic SYNCA,
         output logic TXDA,
@@ -702,19 +704,22 @@ module top(
     );
 
     // ---------------------------------------------------------------------------------------------
-    // ESP32 MODE: the on-screen menu switches the ESFloppy ESP32-S3 between its FLOPPY personality (the
-    // floppy emulator, the default) and a WIFI personality in which it is a virtual modem on Serial A.
-    // See docs/superpowers/specs/2026-10-10-esp32-wifi-mode-design.md.
+    // ESP32 MODE: the on-screen menu switches between FLOPPY (ESFloppy, the default) and WIFI. See
+    // docs/superpowers/specs/2026-10-10-esp32-wifi-mode-design.md.
     //
-    // ESFLOPPY_COMM_BUS[5:3] (ESP32 GPIO37/38/39, unused by the floppy firmware) carry the link:
-    //   [3] MODE  FPGA -> ESP32, 1 = WIFI. The ESP32 restarts into the matching personality when it changes.
-    //   [4] FPGA -> ESP32 serial data (the SCC's TXDA); held 0 in FLOPPY mode, as these bits always were
-    //   [5] ESP32 -> FPGA serial data (into the SCC's RXDA). NEVER driven by the FPGA, so the ESP32 can leave
-    //       its WIFI firmware running for a moment after a mode change without ever fighting the FPGA for
-    //       the line. The XDC gives it a pull-up so it idles at the serial "mark" level when nobody drives it.
-    // In WIFI mode SCC channel A is cut off from the physical Serial A pins and wired to those two lines, with
-    // CTS, DCD and DSR held asserted (there is no hardware flow control on this link yet). Serial B and its
-    // USB path are untouched. The physical TXDA pin is parked at mark so a connected device sees an idle line.
+    // The board's own ESP32s have no antenna (LNA_IN is unconnected on the rev 3 PCB), so WIFI mode uses an EXTERNAL
+    // antenna-equipped ESP32 board (e.g. a XIAO ESP32S3) on header J21, and ESFloppy's ESP32 becomes its SD-card
+    // server. In WIFI mode:
+    //   ESFLOPPY_COMM_BUS[3]  MODE, FPGA -> ESFloppy, 1 = WIFI. ESFloppy restarts into its SD-server personality.
+    //   GPIO[2] (J21 pin 5)   Lisa Serial A data out (the SCC's TXDA) -> WiFi board
+    //   GPIO[3] (J21 pin 7)   WiFi board -> the SCC's RXDA                         (XDC pull-up: idles at mark)
+    //   GPIO[4] (J21 pin 2)   ESFloppy -> WiFi board: ESFLOPPY_COMM_BUS[5] passed straight through
+    //   GPIO[5] (J21 pin 4)   WiFi board -> ESFloppy: onto ESFLOPPY_COMM_BUS[4]    (XDC pull-up: idles at mark)
+    // The ESFloppy <-> WiFi board link is a plain wire through the FPGA (no SCC, no clock), so it can run at megabaud.
+    // ESFLOPPY_COMM_BUS[5] is NEVER driven by the FPGA (XDC pull-up), so ESFloppy can't fight the FPGA for it during
+    // a mode change. In FLOPPY mode the FPGA drives none of GPIO[5:2] and holds ESFLOPPY_COMM_BUS[4:3] at 0, as
+    // they always were. SCC channel A is cut off from the physical Serial A pins in WIFI mode, with CTS, DCD and DSR
+    // held asserted (no hardware flow control yet); the physical TXDA pin is parked at mark. Serial B is untouched.
     // ---------------------------------------------------------------------------------------------
     logic esp_wifi_mode_menu;   // clk_pixel domain, straight from the menu
     // Two destinations, two synchronisers. The MODE pin follows sysclk, which runs whether or not the Lisa is
@@ -734,13 +739,19 @@ module top(
     // What the SCC's channel A actually sees. These replace the Serial A pins on the IO_board connections below.
     logic txda_core, rxda_core, ctsa_core, dcda_core, synca_core;
     assign TXDA       = esp_mode_dot ? 1'b1 : txda_core;                 // park the physical TXD at mark in WIFI mode
-    assign rxda_core  = esp_mode_dot ? ESFLOPPY_COMM_BUS[5] : RXDA;      // ESP32's serial TX, or the real port
+    assign rxda_core  = esp_mode_dot ? GPIO[3] : RXDA;                   // the WiFi board on J21, or the real port
     assign ctsa_core  = esp_mode_dot ? 1'b0 : CTSA;                      // active low: asserted
     assign dcda_core  = esp_mode_dot ? 1'b0 : DCDA;
     assign synca_core = esp_mode_dot ? 1'b0 : SYNCA;                     // DSR, active low: asserted
 
+    assign GPIO[2] = esp_mode_dot ? txda_core : 1'bz;                    // Lisa Serial A -> WiFi board
+    assign GPIO[4] = esp_mode_sys ? ESFLOPPY_COMM_BUS[5] : 1'bz;         // ESFloppy -> WiFi board
+    assign GPIO[3] = 1'bz;                                               // inputs only
+    assign GPIO[5] = 1'bz;
+    assign GPIO[1:0] = 2'bzz;                                            // jumper inputs, never driven
+
     assign ESFLOPPY_COMM_BUS[3] = esp_mode_sys;
-    assign ESFLOPPY_COMM_BUS[4] = esp_mode_sys ? txda_core : 1'b0;
+    assign ESFLOPPY_COMM_BUS[4] = esp_mode_sys ? GPIO[5] : 1'b0;         // WiFi board -> ESFloppy
     // ESFLOPPY_COMM_BUS[5] deliberately has no driver (see above)
 
     HDMI_Interface #(
