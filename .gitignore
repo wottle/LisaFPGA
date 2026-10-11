@@ -47,3 +47,6 @@ ila_*.csv
 # RISC-V toolchain for the USB soft-CPU firmware (xPack riscv-none-elf-gcc, ~2GB unpacked). See
 # docs/usb_softcpu_host_design.md for the version and download source.
 /tools/toolchain/
+
+# ESFloppy ESP32 flash backup taken before running the WiFi link test (upstream firmware, 8 MB; never commit)
+/tools/esp32_wifi_test/backup/

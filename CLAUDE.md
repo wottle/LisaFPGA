@@ -12,6 +12,52 @@ FPGA side is written on this branch (menu row `ESP32 MODE`, settings bit 72, com
 synth, and check the two new false paths by effect.** O1/O3/O4 are resolved in the spec; O2 (flow control) and the ESP32
 firmware are still open.
 
+**Windows progress (2026-10-10).** Built in the main checkout (`LisaFPGA` dir, branch checked out there), not a fresh
+clone: its IP state from the earlier USB/HDMI builds is already in place, so the one-time `tools/vivado_scripts` setup
+was not needed. `xvlog` on `top.sv` and `HDMI_Interface.sv`: **clean, no edits needed**. A full-project RTL elaboration
+(`synth_design -rtl` in batch, ~2 min -- a cheap check of every cross-file port, width and driver before an 85-min
+synthesis) was also clean apart from pre-existing warnings. `ESFLOPPY_COMM_BUS` is `inout` in `top.sv`, so reading [5]
+undriven is legal (input buffer only). Production build launched in batch Vivado (runs detached; build results below
+once in).
+**Build result (2026-10-11, production settings, ~1.5 h): WNS +0.125 / WHS +0.060, 0 failing setup/hold endpoints,
+only the 10 known 1080p60 pulse-width entries; 22367 LUTs (the WiFi logic is ~36 LUTs), 41 BRAM.** 30 critical
+warnings, the same pre-existing set (24 are unused-pin `set_property` lines 6-13 / 587-602); none on the new XDC lines.
+Verified BY EFFECT on `top_routed.dcp`: the paths into `esp_mode_sys_int_reg` and `esp_mode_dot_int_reg` come from
+`clk_pixel_1080p60` with EXCEPTION = False Path (no slack computed); `ESFLOPPY_COMM_BUS[5]` has PULLTYPE PULLUP and its
+only cell is an IBUF (nothing in the FPGA can drive it); [3]/[4] are plain OBUFs. `report_power`: **1.53 W** (MMCM
+0.55 W for five) vs upstream's 1.18 W.
+**JTAG hardware test (2026-10-11): PASSED.** The menu shows all 8 rows, ESP32 MODE toggles FLOPPY/WIFI, and the other
+menu items behave as before. Still to do: flash, then SAVE SETTINGS with WIFI + power-cycle to prove bit 72 persists.
+**WiFi serial link: WORKS END TO END (2026-10-11).** `tools/esp32_wifi_test/` is a small AI-written ESP32 test program
+(MODE watcher + 9600 8N1 UART on GPIO38 RX / GPIO39 TX + echo; see its README) flashed on the ESFloppy ESP32 in place of
+ESFloppy, after a full 8 MB flash backup (read twice, identical, SHA-256 `0e075415...`; `tools/esp32_wifi_test/backup/`,
+git-ignored; restore = one `esptool write-flash 0` command). With the JTAG-loaded WiFi build, selecting WIFI produced
+`[mode] WIFI` on the ESP32 console (bus[3]), LisaTerminal on Serial A showed the ESP32's banner (bus[5] via the pull-up),
+and 28 typed bytes arrived clean and were echoed back to LisaTerminal (bus[4] and the SCC RXD mux) -- no framing errors.
+Tooling now on the Windows machine: arduino-cli 1.5.1 (`tools/toolchain/arduino-cli`, digest-verified) and the ESP32
+Arduino core 3.3.12 with esptool 5.3.1 (`%LOCALAPPDATA%\Arduino15`). ESP32 ports on this machine: **COM4 = ESFloppy**
+(MAC ac:a7:04:04:78:94), **COM3 = ESProFile** (ac:a7:04:04:78:98) -- identified from firmware strings; recheck, numbers
+can move. **Lesson: do not read ESProFile's flash with esptool unless you mean to.** A read resets the chip; one aborted
+read ("Packet content transfer stopped") left ESProFile unresponsive and the Lisa then hung at boot until ESProFile was
+reset by hand. ESFloppy is identified safely the same way, but leave ESProFile alone.
+**Pre-existing bug found, NOT fixed here (it is on `main` too):** `frame_width` is never declared in
+`HDMI_Interface.sv`, so its first use (the `cx_adj_comb` line-wrap compare) makes it an implicit **1-bit** net, and the
+`hdmi` core's 12-bit `frame_width` output connects only bit 0 (Synth 8-689). The pipeline-latency wrap therefore never
+happens; the first ~6 pixels of each line are computed wrongly, which is hidden by the border in every mode used so far
+but would show with the image flush left. Fix is `logic [11:0] frame_width;` -- but that restores a real 12-bit compare
+on the already tight 1080p60 `cx` path, so it needs its own branch, build and timing check. A `default_nettype none`
+at the top of the HDL files would have caught it.
+**THERMAL (2026-10-10): the die runs ABOVE ITS RATING.** Read over JTAG from the XADC (`get_hw_sysmons`, read-only, no
+reprogramming): **87.9 C now, 88.6 C peak**, with the flashed CPU-SPEED build (`6a3a1b9`) and the board in its case. The
+`xc7a100tcsg324-2` is commercial grade, **85 C max junction** -- and every timing sign-off in this file assumes <= 85 C.
+VCCINT 0.972 V (in spec), VCCAUX 1.759 V. **It is just as hot with the Lisa switched off**, so the heat is always-on
+infrastructure (five MMCMs now vs upstream's three, HDMI serializer clocks and TMDS drivers, clock trees), not the
+Lisa core or the CPU SPEED setting. Upstream's own June estimate was 1.18 W (MMCM 0.32 W for three); ours is likely
+~1.4-1.6 W. **Planned next, after the WiFi build is tested:** an A/B on the same board and case, Lisa off, same
+resolution: read the temperature on our build, JTAG-load upstream's committed bitstream (temporary), let it settle
+10-15 min, read again. Similar result -> the fix is a heatsink/airflow; much cooler -> trim what we added (e.g. share
+MMCMs). A small 15x15 mm stick-on heatsink on the package is the likely cure either way.
+
 ## Recently completed: merged upstream (ESFloppy release) into feature/settings-flash-persistence,
 ## moved the on-screen menu's summon gesture off OK
 
