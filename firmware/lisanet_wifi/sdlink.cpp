@@ -152,7 +152,7 @@ int openRead(const String &path, uint64_t &size) {
 int openWriteReserve(const String &path, uint64_t size) {
     uint8_t a[9] = {3};
     put64(a + 1, size);
-    return call(0x20, a, 9, (const uint8_t *)path.c_str(), path.length(), 10000);
+    return call(0x20, a, 9, (const uint8_t *)path.c_str(), path.length(), 30000);   // preAllocate scans the FAT
 }
 
 int read(uint64_t off, uint8_t *buf, size_t want, size_t &got) {

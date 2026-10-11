@@ -74,6 +74,22 @@ made LOS complain and hang (recovered by reset). Comparing the used copy with th
 intact and consistent.** Sector 28 is the volume record; its name field (offset 12) is "AOS 3.0"; "1000 Miles" is a
 directory entry in sector 43. "I" matches neither, and neither was damaged. The copy is kept on the card as
 `/LISANET/1000-miles-copy.dc42`; the original `/1000-miles.dc42` is untouched.
+**J21 routing build (2026-10-11): WNS +0.274 / WHS +0.058, 0 failing setup/hold endpoints, only the 10 known pulse-width
+entries.** Verified on `top_routed.dcp`: GPIO2/GPIO4 are OBUFT with PULLDOWN, GPIO3/GPIO5 IBUF with PULLUP, GPIO0/1 IBUF
+with PULLDOWN, ESFLOPPY_COMM_BUS[5] still IBUF-only with PULLUP, [3]/[4] OBUF; both esp_mode false paths bind.
+**JTAG-loaded, Serial A loopback PASSED:** a jumper from J21 pin 5 (GPIO2) to pin 7 (GPIO3) echoed LisaTerminal's typing
+in WIFI mode, and the echo stopped in FLOPPY. LisaTerminal's local echo is off, so a working loop shows each letter
+ONCE -- test by flipping to FLOPPY, not by counting letters. Not yet in flash; the GPIO4/5 link path will be tested by
+the XIAO itself.
+**XIAO firmware (`firmware/lisanet_wifi`, 2026-10-11): written and compiles clean for `esp32:esp32:XIAO_ESP32S3`;
+untested (no XIAO yet).** `atmodem` (AT commands on Serial A, ported from the phase-1 draft, plus AT+WEBPASS / AT+WEB /
+AT+SDINFO -- the last is the first link test), `web` + `page.cpp` (Basic-auth SD manager at lisanet.local: list,
+download, contiguous upload, rename, delete, mkdir, mount-next), `sdlink` (link client). Everything runs from `loop()`
+on one task, so the link is never shared. ESP32 WebServer gotchas: a raw (streamed) body is only offered to POST
+handlers registered with an upload function, and the QUERY STRING IS PARSED AFTER the body -- so the upload path travels
+in an `X-Path` header (registered with `collectHeaders`) and the size comes from `clientContentLength()`. The password
+is checked at RAW_START, before anything touches the card. The XIAO cannot see the MODE line: in FLOPPY mode link calls
+simply time out (the page reports 503).
 **"ESFloppy's button doesn't mount a disk" -- SOLVED (2026-10-11), not a button or FPGA problem.** With the OLED dead,
 a "virtual OLED" build of ESFloppy (local `lisanet` branch, uncommitted: `lisanetLogUi()` in `ui.cpp` plus
 `filePickerDescribe()` in `uiFilePicker.cpp`) logs button presses, screen changes, the file picker highlight, error
