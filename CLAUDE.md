@@ -74,6 +74,20 @@ made LOS complain and hang (recovered by reset). Comparing the used copy with th
 intact and consistent.** Sector 28 is the volume record; its name field (offset 12) is "AOS 3.0"; "1000 Miles" is a
 directory entry in sector 43. "I" matches neither, and neither was damaged. The copy is kept on the card as
 `/LISANET/1000-miles-copy.dc42`; the original `/1000-miles.dc42` is untouched.
+**"ESFloppy's button doesn't mount a disk" -- SOLVED (2026-10-11), not a button or FPGA problem.** With the OLED dead,
+a "virtual OLED" build of ESFloppy (local `lisanet` branch, uncommitted: `lisanetLogUi()` in `ui.cpp` plus
+`filePickerDescribe()` in `uiFilePicker.cpp`) logs button presses, screen changes, the file picker highlight, error
+text and drive contents on the USB console. It showed two things. First, `/1000-miles.dc42` was **fragmented on the card**
+(copied from a Mac), so ESFloppy's `contiguousRange()` check refused it with "Image file is not contiguous!". Fixed by
+downloading it, deleting it and re-uploading with OPEN mode 3 via `lisanet.ps1` (SHA-256 identical, `0c00f225...`; backup
+in `tools/esp32_wifi_test/backup/`); it then mounted. Second, the picker sorts folders before files, so the
+`/LISANET` folder came first and blind SEL, SEL entered it. Fixed by renaming it **`/.LISANET`** (the picker hides
+names starting with `.`; firmware paths in `SDTask.cpp`/`sdServer.cpp` and the protocol doc updated): the image is now
+`[1/1]` and SEL, SEL mounts it, confirmed. **Gotchas:** SEL is the FPGA
+menu's OK too, so with the on-screen menu still open a SEL press also toggles the highlighted row (it flipped ESP32
+MODE back to WIFI once) -- close the menu before using ESFloppy. SEL within 5 s of ESFloppy starting opens its
+settings screen, which only a reboot leaves. In Git Bash, paths like `/1000-miles.dc42` passed to `lisanet.ps1` get
+rewritten to Windows paths (server says NOT_FOUND): set `MSYS_NO_PATHCONV=1`.
 **Pre-existing bug found, NOT fixed here (it is on `main` too):** `frame_width` is never declared in
 `HDMI_Interface.sv`, so its first use (the `cx_adj_comb` line-wrap compare) makes it an implicit **1-bit** net, and the
 `hdmi` core's 12-bit `frame_width` output connects only bit 0 (Synth 8-689). The pipeline-latency wrap therefore never

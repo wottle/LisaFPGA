@@ -1,0 +1,35 @@
+// sdlink -- LisaNet link client: talks to ESFloppy's SD server (docs/lisanet_link_protocol.md). Written with an AI assistant.
+#pragma once
+#include <Arduino.h>
+
+namespace sdlink {
+
+enum Status : int {
+    OK = 0, NOT_FOUND, EXISTS, IO, BAD_REQUEST, NO_HANDLE, UNKNOWN_CMD, NO_CARD, NO_CONTIGUOUS,
+    TIMEOUT = -1               // no valid response (ESFloppy not in WIFI mode, or not connected)
+};
+const char *statusName(int s);
+
+static const size_t MAX_DATA = 4096;
+
+struct Entry { bool dir; uint64_t size; String name; };
+
+void begin(HardwareSerial &port, int rxPin, int txPin, uint32_t baud);
+
+int hello(String &firmware);
+int info(uint64_t &cardBytes, uint64_t &freeBytes);
+// Calls fn for every entry of a directory (pages through LIST). Returns a status.
+int list(const String &path, void (*fn)(const Entry &, void *), void *ctx);
+int stat(const String &path, bool &isDir, uint64_t &size);
+int openRead(const String &path, uint64_t &size);
+int openWriteReserve(const String &path, uint64_t size);   // OPEN mode 3: contiguous, as ESFloppy requires
+int read(uint64_t offset, uint8_t *buf, size_t want, size_t &got);
+int write(uint64_t offset, const uint8_t *buf, size_t n);
+int close();
+int remove(const String &path);
+int rename(const String &from, const String &to);
+int mkdir(const String &path);
+int mountNextSet(const String &path);                      // empty path clears it
+int mountNextGet(String &path);
+
+}  // namespace sdlink

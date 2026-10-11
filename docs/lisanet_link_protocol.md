@@ -69,5 +69,5 @@ One file can be open at a time; OPEN closes any file already open. **Upload disk
 mounts an image stored in one unbroken run of sectors (it writes tracks straight to raw sectors), and mode 3 reserves
 the whole size contiguously up front (SdFat `preAllocate`), failing with NO_CONTIGUOUS rather than storing it
 fragmented. LIST pages: send `start_index` 0, then the
-returned `next_index` until it is 0xFFFF. MOUNT_NEXT stores an image in `/LISANET/MOUNTNXT.TXT`; ESFloppy
+returned `next_index` until it is 0xFFFF. MOUNT_NEXT stores an image in `/.LISANET/MOUNTNXT.TXT` (a dot folder, so the file picker hides it); ESFloppy
 mounts it in drive 1 (the Sony drive, or the lower Twiggy) **every** time it starts in FLOPPY mode, until cleared.
