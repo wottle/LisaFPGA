@@ -237,8 +237,7 @@ module top(
     assign ESFLOPPY_COMM_BUS[0] = LEFT_ESFLOPPY;
     assign ESFLOPPY_COMM_BUS[1] = OK_ESFLOPPY;
     assign ESFLOPPY_COMM_BUS[2] = RIGHT_ESFLOPPY;
-    // Set the rest of the comm bus to a defined state
-    assign ESFLOPPY_COMM_BUS[5:3] = 3'b000;
+    // Bits [5:3] are the WiFi-mode link to the ESP32 (MODE, serial TX, serial RX) -- see "ESP32 MODE" below.
 
     logic _SL0;
     logic _SH0;
@@ -702,6 +701,48 @@ module top(
         .flash_miso(FLASH_MISO)
     );
 
+    // ---------------------------------------------------------------------------------------------
+    // ESP32 MODE: the on-screen menu switches the ESFloppy ESP32-S3 between its FLOPPY personality (the
+    // floppy emulator, the default) and a WIFI personality in which it is a virtual modem on Serial A.
+    // See docs/superpowers/specs/2026-10-10-esp32-wifi-mode-design.md.
+    //
+    // ESFLOPPY_COMM_BUS[5:3] (ESP32 GPIO37/38/39, unused by the floppy firmware) carry the link:
+    //   [3] MODE  FPGA -> ESP32, 1 = WIFI. The ESP32 restarts into the matching personality when it changes.
+    //   [4] FPGA -> ESP32 serial data (the SCC's TXDA); held 0 in FLOPPY mode, as these bits always were
+    //   [5] ESP32 -> FPGA serial data (into the SCC's RXDA). NEVER driven by the FPGA, so the ESP32 can leave
+    //       its WIFI firmware running for a moment after a mode change without ever fighting the FPGA for
+    //       the line. The XDC gives it a pull-up so it idles at the serial "mark" level when nobody drives it.
+    // In WIFI mode SCC channel A is cut off from the physical Serial A pins and wired to those two lines, with
+    // CTS, DCD and DSR held asserted (there is no hardware flow control on this link yet). Serial B and its
+    // USB path are untouched. The physical TXDA pin is parked at mark so a connected device sees an idle line.
+    // ---------------------------------------------------------------------------------------------
+    logic esp_wifi_mode_menu;   // clk_pixel domain, straight from the menu
+    // Two destinations, two synchronisers. The MODE pin follows sysclk, which runs whether or not the Lisa is
+    // switched on (so a saved WIFI mode reaches the ESP32 at power-up). The SCC mux follows DOTCK, the SCC's own
+    // clock. Only the level crosses, and it changes at human speed.
+    (* ASYNC_REG = "TRUE" *) logic esp_mode_sys_int, esp_mode_sys;
+    (* ASYNC_REG = "TRUE" *) logic esp_mode_dot_int, esp_mode_dot;
+    always_ff @(posedge sysclk_fabric) begin
+        esp_mode_sys_int <= esp_wifi_mode_menu;
+        esp_mode_sys     <= esp_mode_sys_int;
+    end
+    always_ff @(posedge DOTCK) begin
+        esp_mode_dot_int <= esp_wifi_mode_menu;
+        esp_mode_dot     <= esp_mode_dot_int;
+    end
+
+    // What the SCC's channel A actually sees. These replace the Serial A pins on the IO_board connections below.
+    logic txda_core, rxda_core, ctsa_core, dcda_core, synca_core;
+    assign TXDA       = esp_mode_dot ? 1'b1 : txda_core;                 // park the physical TXD at mark in WIFI mode
+    assign rxda_core  = esp_mode_dot ? ESFLOPPY_COMM_BUS[5] : RXDA;      // ESP32's serial TX, or the real port
+    assign ctsa_core  = esp_mode_dot ? 1'b0 : CTSA;                      // active low: asserted
+    assign dcda_core  = esp_mode_dot ? 1'b0 : DCDA;
+    assign synca_core = esp_mode_dot ? 1'b0 : SYNCA;                     // DSR, active low: asserted
+
+    assign ESFLOPPY_COMM_BUS[3] = esp_mode_sys;
+    assign ESFLOPPY_COMM_BUS[4] = esp_mode_sys ? txda_core : 1'b0;
+    // ESFLOPPY_COMM_BUS[5] deliberately has no driver (see above)
+
     HDMI_Interface #(
         .OUTPUT_1024X768(OUTPUT_1024X768),
         .HALIGN_1080P(OUTPUT_1080P_HALIGN),
@@ -719,6 +760,7 @@ module top(
         .settings_save_data(settings_save_data),
         .settings_save_req(settings_save_req),
         .cpu_speed(cpu_speed_menu),
+        .esp_wifi_mode(esp_wifi_mode_menu),
         .jedec_id(settings_dbg_word),
         .btn_left(LEFT_ESFLOPPY),
         .btn_ok(OK_ESFLOPPY),
@@ -1546,13 +1588,13 @@ module top(
         .KBD_in(KBD_in),
         .KBD_out(KBD_out),
         .M(M),
-        .SYNCA(SYNCA),
-        .TXDA(TXDA),
+        .SYNCA(synca_core),   // Serial A goes through the ESP32 MODE mux above: pins in FLOPPY mode, ESP32 in WIFI mode
+        .TXDA(txda_core),
         .RTSA(RTSA),
         .DTRA(DTRA),
-        .RXDA(RXDA),
-        .CTSA(CTSA),
-        .DCDA(DCDA),
+        .RXDA(rxda_core),
+        .CTSA(ctsa_core),
+        .DCDA(dcda_core),
         .TRXCA(TRXCA),
         .RTXCA(RTXCA),
         .TXDB(TXDB),

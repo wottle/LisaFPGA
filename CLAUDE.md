@@ -1,13 +1,16 @@
 # LisaFPGA — Project Notes for Claude
 
-## Planned: ESP32 WiFi mode ("LisaNet") — design only, nothing built (2026-10-10)
+## In progress: ESP32 WiFi mode ("LisaNet") — FPGA RTL written, NEVER COMPILED OR RUN (2026-10-10)
 
 **Branch:** `feature/esp32-wifi-mode` (off `fork/main` @ `a01fff7`; worktree at `.worktrees/esp32-wifi` in the
 original checkout). **Spec: `docs/superpowers/specs/2026-10-10-esp32-wifi-mode-design.md`** — read it first.
 Idea: an on-screen-menu `ESP32 MODE` toggle (FLOPPY/WIFI); in WIFI the ESFloppy ESP32-S3 restarts into a WiFi
 personality and appears as a virtual modem on Lisa **Serial A** (SCC channel A muxed to the ESP32 over spare
 `ESFLOPPY_COMM_BUS` lines), with a Lisa-side LisaNet app, SD-card file management first, network client/SLIP later.
-Open hardware questions O1-O7 in the spec must be resolved first (pin mapping, free settings bits, flow control).
+FPGA side is written on this branch (menu row `ESP32 MODE`, settings bit 72, comm-bus [5:3] = MODE/TX/RX, SCC-A mux in
+`top.sv`, XDC pull-up + false paths) but has had no Vivado run — **first step on the Windows machine: `xvlog` syntax check, then
+synth, and check the two new false paths by effect.** O1/O3/O4 are resolved in the spec; O2 (flow control) and the ESP32
+firmware are still open.
 
 ## Recently completed: merged upstream (ESFloppy release) into feature/settings-flash-persistence,
 ## moved the on-screen menu's summon gesture off OK

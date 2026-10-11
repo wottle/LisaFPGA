@@ -1,6 +1,7 @@
 # ESP32 WiFi mode ("LisaNet") — design spec
 
-Status: **design approved in conversation 2026-10-10; nothing implemented or tested.**
+Status: **design approved 2026-10-10. Phase 1 FPGA-side RTL written (menu row, settings bit, comm-bus pins, SCC-A mux) but
+*never compiled or run* — no Vivado/HDL tools on the Mac. ESP32 firmware not started.**
 Branch: `feature/esp32-wifi-mode` (off `fork/main` @ `a01fff7`).
 This file is meant to be self-contained: copy the project directory to the Windows/Vivado machine and
 everything needed to pick the work up is here.
@@ -82,21 +83,25 @@ not depend on the floppy lines.
 - Physical Serial A pins are idle in WIFI mode. Serial B / USB console unaffected.
 - Baud: start at 9600 then 19200 (a 400K image ≈ 3–6 min); raise later, SCC/ESP32 UART limits to be measured.
 
-### 3.3 Comm bus pin plan (proposed — **verify before building**)
-| Bus bit | ESP32 GPIO | Floppy mode | WiFi mode |
-|---|---|---|---|
-| [0] | 34 | LEFT echo (FPGA→ESP) | CTS/RTS flow control, or unused |
-| [1] | 35 | OK/SEL echo | flow control, or unused |
-| [2] | 36 | RIGHT echo | unused |
-| [3] | 37 | 0 (unused) | **MODE** (FPGA→ESP) — must be a stable level in both personalities |
-| [4] | 38 | 0 | **UART: FPGA TX → ESP RX** |
-| [5] | 39 | 0 | **UART: ESP TX → FPGA RX** |
+### 3.3 Comm bus pin plan (as implemented in `top.sv`; O1 verified against the PCB netlist)
+| Bus bit | FPGA pin | ESP32 GPIO | Floppy mode | WiFi mode |
+|---|---|---|---|---|
+| [0] | M13 | 34 (`LEFT`) | LEFT echo (FPGA→ESP) | unchanged (buttons still echoed; unused by WiFi firmware) |
+| [1] | R18 | 35 (`SEL`) | OK echo | unchanged |
+| [2] | T18 | 36 (`RIGHT`) | RIGHT echo | unchanged |
+| [3] | N14 | 37 (`FPGA_3`) | driven 0 | **MODE** = 1 (FPGA→ESP) |
+| [4] | P14 | 38 (`FPGA_4`) | driven 0 | **FPGA TX → ESP RX** (the SCC's `TXDA`) |
+| [5] | N17 | 39 (`FPGA_5`) | not driven (pull-up) | **ESP TX → FPGA RX** (into the SCC's `RXDA`); never driven by the FPGA |
 
-Rule: lines [3]–[5] are free in FLOPPY mode today, so MODE/TX/RX go there and no existing behaviour changes.
-Hardware flow control (RTS/CTS) is desirable but only [0]/[1] remain, and they're live button echoes in
-FLOPPY mode; reuse them only after the ESP32 has switched personality (i.e. only in WIFI mode, since the
-firmware stops reading buttons as buttons then). Open question O2 below. Add a one-flop synchroniser on
-every ESP→FPGA input; the SCC clock domain differs from sysclk.
+Rules: [3]–[5] were free in FLOPPY mode, so no existing behaviour changes. Bit [5] is **never** driven by the FPGA
+(XDC pull-up instead), so a WiFi firmware still running for a moment after a switch back to FLOPPY can't fight the
+FPGA over the line. ESP32 side: GPIO37 = input (MODE), GPIO38 = UART RX, GPIO39 = UART TX; none are strapping pins.
+**No hardware flow control in phase 1**: CTS/DCD/DSR into the SCC are held asserted in WIFI mode (O2 stays open;
+if wanted later, [0]/[1] are the only candidates and are live button echoes in FLOPPY mode).
+
+Mode switch plumbing: menu row `ESP32 MODE` → `esp_wifi_mode` (clk_pixel) → two 2-flop synchronisers in `top.sv`
+(sysclk_fabric for the MODE pin so a saved WIFI mode reaches the ESP32 even with the Lisa off; DOTCK for the SCC mux),
+false-pathed in the XDC. The SCC core already 2-FF-synchronises `rxda`/`ctsa`/`dcda`/`synca` itself.
 
 ### 3.4 Protocol (phased)
 1. **Phase 1 — link + WiFi setup:** Hayes-style `AT` commands over the serial link: `AT` (ok), scan
@@ -157,13 +162,16 @@ ESP32 firmware is built with Arduino (ESP32-S3 Dev Module, USB CDC on boot enabl
 
 ## 7. Open questions (resolve before/while implementing)
 
-- **O1.** Confirm bus bit ↔ `FPGA_n` ↔ GPIO mapping from the EasyEDA netlist (`.epro2`, `PAD_NET`
-  records) rather than the drawing, and that nothing else loads GPIO37–39 (the fork's ESFloppy source only
-  shows their `#define`s; grep the firmware and the board netlist).
-- **O2.** Flow control: is software (XON/XOFF) or hardware RTS/CTS wanted? If hardware, which two lines.
-- **O3.** Free bits in the 80-bit settings block (`settings_flash.sv`) and the cleanest place to add the flag.
-- **O4.** Exactly which SCC-A signals to mux (TXDA/RXDA only, or also RTSA/CTSA/DTRA/DCDA), and what the
-  Lisa's Serial A driver in the Office System expects on the control lines.
+- **O1. RESOLVED (2026-10-10).** PCB netlist (`.epro2` is a zip; `PAD_NET` records) confirms FPGA M13/R18/T18/N14/P14/N17
+  = `FPGA_0..5_ESFLOPPY` = ESP32-S3 pads 39–44 = GPIO34–39. ESFloppy's source only `#define`s `FPGA_3..5` (GPIO37–39) and
+  never uses them. (Its `types.h` also lists stale `FPGA_6/7` = GPIO40/41, which are the SD pins.)
+- **O2.** Open. Flow control: none in phase 1 (CTS/DCD/DSR tied asserted). Decide software (XON/XOFF) vs hardware later.
+- **O3. RESOLVED.** The 80-bit payload is block bytes 4..13; byte 13 (bits 79:72) is reserved, written as 0 and covered
+  by the checksum. **Bit 72 = ESP32 MODE (1 = WIFI)**; old blocks load as FLOPPY and still pass the checksum.
+- **O4. RESOLVED.** All SCC-A signals are plain ports of `IO_board`, so the mux lives in `top.sv` without touching the SCC.
+  Muxed: `RXDA` (from the ESP32), `CTSA`/`DCDA`/`SYNCA` (held asserted). `TXDA` goes to the ESP32 and the physical pin is
+  parked at mark. `RTSA`/`DTRA`/`TRXCA`/`RTXCA` are left alone. Still to confirm on the Lisa: that the Office System's serial
+  driver is happy with DCD/DSR/CTS permanently asserted.
 - **O5.** ESFloppy teardown before restart: any pending SD writes to a mounted image must be flushed.
 - **O6.** Achievable baud rate through the SCC core and ESP32 UART; whether the Office System serial driver
   tolerates > 19200.

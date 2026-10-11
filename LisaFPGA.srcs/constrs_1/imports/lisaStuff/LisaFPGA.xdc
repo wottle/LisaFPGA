@@ -268,6 +268,13 @@ set_false_path -to [get_pins dotck_final_mux/CE*]
 ## pixel -> dotck_20M paths are gone from the timing report) rather than trusting the absence of a warning.
 set_false_path -to [get_cells {speed_menu_int_reg[*]}]
 
+## The ESP32 MODE menu choice crosses from the pixel clock through two-stage synchronisers in top.sv, one into
+## sysclk_fabric (the MODE pin) and one into DOTCK (the Serial A mux). The first stage of each is the async
+## boundary. Verify by EFFECT (see CLAUDE.md "XDC gotchas"): after implementation, check these paths show slack
+## inf / are absent from the Inter Clock Table, rather than trusting the absence of a warning.
+set_false_path -to [get_cells esp_mode_sys_int_reg]
+set_false_path -to [get_cells esp_mode_dot_int_reg]
+
 ## We do use the framerate select signals in some other places though, so they're fed through synchronizers in those cases
 ## We need false paths for those too
 set_false_path -to [get_cells lisa_hdmi_output/framerate_sel_int_pixel_reg]
@@ -477,6 +484,10 @@ set_property -dict {PACKAGE_PIN T18 IOSTANDARD LVCMOS33} [get_ports {ESFLOPPY_CO
 set_property -dict {PACKAGE_PIN N14 IOSTANDARD LVCMOS33} [get_ports {ESFLOPPY_COMM_BUS[3]}]
 set_property -dict {PACKAGE_PIN P14 IOSTANDARD LVCMOS33} [get_ports {ESFLOPPY_COMM_BUS[4]}]
 set_property -dict {PACKAGE_PIN N17 IOSTANDARD LVCMOS33} [get_ports {ESFLOPPY_COMM_BUS[5]}]
+## [5] is the ESP32's serial TX in WIFI mode and is never driven by the FPGA (see "ESP32 MODE" in top.sv). Pull it
+## up so it idles at the serial mark level whenever the ESP32 isn't driving it (FLOPPY mode, or mid-restart).
+## NO pull-up on [3]/[4]: the FPGA drives both, always.
+set_property PULLTYPE PULLUP [get_ports {ESFLOPPY_COMM_BUS[5]}]
 set_property -dict {PACKAGE_PIN N15 IOSTANDARD LVCMOS33} [get_ports RDA_ESFLOPPY]
 set_property -dict {PACKAGE_PIN N16 IOSTANDARD LVCMOS33} [get_ports WRD_ESFLOPPY]
 set_property -dict {PACKAGE_PIN P17 IOSTANDARD LVCMOS33} [get_ports SNS_ESFLOPPY]

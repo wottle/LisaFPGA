@@ -42,6 +42,9 @@ module HDMI_Interface #(
     // The menu's CPU SPEED choice, clk_pixel domain: {menu owns it, speed index 0-3 = 5/10/15/18.75MHz}.
     // Bit 2 low means "follow the SPEED SELECT switches". top.sv synchronises it into the dot clock domain.
     output logic [2:0]  cpu_speed,
+    // The menu's ESP32 MODE choice, clk_pixel domain: 0 = FLOPPY (ESFloppy, the default), 1 = WIFI (the ESP32
+    // becomes a virtual modem on Serial A). Persisted in settings bit 72. top.sv synchronises it before use.
+    output logic        esp_wifi_mode = 1'b0,
 
     // ESFloppy control buttons, active low. Only read when ALIGNMENT_TUNING_MODE is set; ignored otherwise.
     input logic btn_left,
@@ -633,7 +636,7 @@ module HDMI_Interface #(
     // button press. Called only from the always_ff below, so these registers keep a single driver.
     task automatic start_save();
         settings_save_data <= {
-            {8'b0, speed_user_set, speed_idx, 1'b1, video_mode, contrast_override_menu, scanlines_override},
+            {7'b0, esp_wifi_mode, speed_user_set, speed_idx, 1'b1, video_mode, contrast_override_menu, scanlines_override},
             {5'b0, v_offset_1024},
             {5'b0, h_offset_1024},
             {5'b0, v_offset_1080p},
@@ -687,6 +690,9 @@ module HDMI_Interface #(
                     v_offset_1024  <= settings_data[58:48];
                     settings_valid_q       <= 1'b1;
                     contrast_override_menu <= settings_data[65];
+                    // Bit 72 was the old block's reserved byte, always written as 0, so a block saved before
+                    // ESP32 MODE existed loads as FLOPPY (and its checksum still matches).
+                    esp_wifi_mode <= settings_data[72];
                     // A saved CPU speed takes over from the switches, as a saved resolution does from the
                     // jumper. Blocks saved before this existed have bit 71 clear, so they keep the switches.
                     if (settings_data[71]) begin
@@ -766,7 +772,10 @@ module HDMI_Interface #(
                                 else                        speed_idx <= speed_idx + 1'b1;
                             end
                             3'd4: contrast_override_menu <= ~contrast_override_menu;   // MAX CONTRAST
-                            3'd5: start_save();                                         // SAVE SETTINGS
+                            // ESP32 MODE: FLOPPY <-> WIFI. Takes effect at once (the ESP32 restarts into the other
+                            // personality); it is only remembered across a power cycle if SAVE SETTINGS is used.
+                            3'd5: esp_wifi_mode <= ~esp_wifi_mode;
+                            3'd6: start_save();                                         // SAVE SETTINGS
                             default: menu_active <= 1'b0;                              // EXIT
                         endcase
                     end else if (tuning_active) begin
@@ -783,9 +792,9 @@ module HDMI_Interface #(
                     // Suppressed while the LEFT+RIGHT summon chord is down, so starting or releasing that
                     // hold doesn't also nudge the highlight.
                     if (!summon_pressed && btn_sync[2] == 1'b0 && prev_left == 1'b1) begin
-                        menu_sel <= (menu_sel == 3'd0) ? 3'd6 : menu_sel - 1'b1;
+                        menu_sel <= (menu_sel == 3'd0) ? 3'd7 : menu_sel - 1'b1;
                     end else if (!summon_pressed && btn_sync[0] == 1'b0 && prev_right == 1'b1) begin
-                        menu_sel <= (menu_sel == 3'd6) ? 3'd0 : menu_sel + 1'b1;
+                        menu_sel <= (menu_sel == 3'd7) ? 3'd0 : menu_sel + 1'b1;
                     end
                 end else if (tuning_active && !summon_pressed) begin
                     // Key repeat: count frames held (one direction at a time), move on the first frame and
@@ -1121,7 +1130,8 @@ module HDMI_Interface #(
             2: menu_label = "ADJUST VERT     ";
             3: menu_label = "CPU SPEED       ";
             4: menu_label = "MAX CONTRAST    ";
-            5: menu_label = "SAVE SETTINGS   ";
+            5: menu_label = "ESP32 MODE      ";
+            6: menu_label = "SAVE SETTINGS   ";
             default: menu_label = "EXIT            ";
         endcase
     endfunction
@@ -1141,13 +1151,15 @@ module HDMI_Interface #(
             12: menu_value = "   10MHZ";
             13: menu_value = "   15MHZ";
             14: menu_value = "18.75MHZ";
+            15: menu_value = "  FLOPPY"; // ESP32 MODE: ESFloppy floppy emulator (default)
+            16: menu_value = "    WIFI"; // ESP32 MODE: ESP32 is a WiFi virtual modem on Serial A
             default: menu_value = "        ";
         endcase
     endfunction
 
     (* rom_style = "distributed" *) logic [7:0] font_rom   [0:511];
-    (* rom_style = "distributed" *) logic [5:0] label_rom  [0:111]; // 7 rows x 16 chars
-    (* rom_style = "distributed" *) logic [5:0] value_rom  [0:127]; // 16 slots x 8 chars (15 used)
+    (* rom_style = "distributed" *) logic [5:0] label_rom  [0:127]; // 8 rows x 16 chars
+    (* rom_style = "distributed" *) logic [5:0] value_rom  [0:255]; // 32 slots x 8 chars (17 used)
     logic [63:0] glyph_tmp;
     logic [127:0] label_tmp;
     logic [63:0] value_tmp;
@@ -1156,14 +1168,14 @@ module HDMI_Interface #(
             glyph_tmp = glyph_bits(g);
             for (int r = 0; r < 8; r = r + 1) font_rom[g*8 + r] = glyph_tmp[8*(7-r) +: 8];
         end
-        for (int i = 0; i < 7; i = i + 1) begin
+        for (int i = 0; i < 8; i = i + 1) begin
             label_tmp = menu_label(i);
             for (int j = 0; j < 16; j = j + 1) label_rom[i*16 + j] = ascii_glyph(label_tmp[8*(15-j) +: 8]);
         end
         // Value strings: blank, 1080P30, 1024X768, ON, OFF, 1080P60, SAVED, DEFAULT, SAVING, NO ROOM, and the
-        // five CPU SPEED values.
-        // Fill all 16 slots (menu_value's default is blank) so no index can read an uninitialised entry.
-        for (int i = 0; i < 16; i = i + 1) begin
+        // five CPU SPEED values, FLOPPY and WIFI.
+        // Fill all 32 slots (menu_value's default is blank) so no index can read an uninitialised entry.
+        for (int i = 0; i < 32; i = i + 1) begin
             value_tmp = menu_value(i);
             for (int j = 0; j < 8; j = j + 1) value_rom[i*8 + j] = ascii_glyph(value_tmp[8*(7-j) +: 8]);
         end
@@ -1217,26 +1229,26 @@ module HDMI_Interface #(
         overlay_pixel <= font_rom[{ovl_glyph, ovl_dy[4:2]}][7 - ovl_dx[4:2]];
     end
 
-    // --- Menu: 24 chars x 7 rows at 2x scale => 384x112, centred for whichever mode is live ---
+    // --- Menu: 24 chars x 8 rows at 2x scale => 384x128, centred for whichever mode is live ---
     localparam int MENU_W = 384;
-    localparam int MENU_H = 112; // 7 rows at 16px
+    localparam int MENU_H = 128; // 8 rows at 16px
     logic [11:0] menu_x;
     logic [10:0] menu_y;
     assign menu_x = in_1024_mode ? 12'd320 : 12'd768;
-    assign menu_y = in_1024_mode ? 11'd328 : 11'd484;  // (768-112)/2 and (1080-112)/2
+    assign menu_y = in_1024_mode ? 11'd320 : 11'd476;  // (768-128)/2 and (1080-128)/2
 
     logic menu_on, menu_pixel, menu_highlight;
     logic [11:0] mdx;
     logic [10:0] mdy;
     logic [2:0] m_row;
-    logic [3:0] m_vid;
+    logic [4:0] m_vid;
     // Registered copy, used for the value-string ROM lookup. m_vid depends ONLY on m_row, which comes
     // from mdy and is therefore constant for a whole scan line -- so delaying it by one pixel clock is
     // visually free: it settles one pixel into the line, and the menu box does not start until x=320
     // (1024x768) or x=768 (1080p). What it buys is breaking the
     //   video_mode -> m_vid -> value_rom -> m_glyph -> font_rom -> menu_pixel
     // chain, which is 12 logic levels and was marginal at 1080p60's 6.737ns (WNS -0.019).
-    logic [3:0] m_vid_q;
+    logic [4:0] m_vid_q;
     logic [4:0] m_col;
     logic [5:0] m_glyph;
     logic [3:0] hex_nib;
@@ -1255,8 +1267,9 @@ module HDMI_Interface #(
             3'd2: m_vid = (v_limit == 11'd0) ? 4'd9 : 4'd0;       // ADJUST VERT: NO ROOM where it can't move
             3'd3: m_vid = speed_user_set ? (4'd11 + 4'(speed_idx)) : 4'd10; // CPU SPEED
             3'd4: m_vid = contrast_eff  ? 4'd3 : 4'd4;
+            3'd5: m_vid = esp_wifi_mode ? 5'd16 : 5'd15;          // ESP32 MODE: WIFI / FLOPPY
             // SAVING wins over both, so a repeat save on an already-saved board still shows something happening
-            3'd5: m_vid = save_active ? 4'd8 : (settings_valid_q ? 4'd6 : 4'd7);
+            3'd6: m_vid = save_active ? 4'd8 : (settings_valid_q ? 4'd6 : 4'd7);
             default: m_vid = 4'd0;                        // EXIT has no value
         endcase
         // Columns 0-15 are the label, 16-23 the value (m_col[2:0] conveniently gives 0-7 there).
@@ -1269,7 +1282,7 @@ module HDMI_Interface #(
         hex_nib = jedec_id[hex_idx*4 +: 4];
         if (m_col < 5'd16) begin
             m_glyph = label_rom[{m_row, m_col[3:0]}];
-        end else if (m_row == 3'd5 && !settings_valid_q && !save_active) begin
+        end else if (m_row == 3'd6 && !settings_valid_q && !save_active) begin
             if (m_col[2:0] < 3'd2) m_glyph = 6'd10;                       // leading spaces
             else if (hex_nib < 4'd10) m_glyph = 6'(hex_nib);              // 0-9
             else m_glyph = 6'd12 + 6'(hex_nib) - 6'd10;                   // A-F
