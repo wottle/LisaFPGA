@@ -90,6 +90,16 @@ handlers registered with an upload function, and the QUERY STRING IS PARSED AFTE
 in an `X-Path` header (registered with `collectHeaders`) and the size comes from `clientContentLength()`. The password
 is checked at RAW_START, before anything touches the card. The XIAO cannot see the MODE line: in FLOPPY mode link calls
 simply time out (the page reports 503).
+**XIAO bring-up (2026-10-12): firmware runs, WiFi + link to ESFloppy WORK.** XIAO ESP32S3 (MAC 68:ee:8f:62:f5:e4, 8 MB
+PSRAM) on COM7 (Seeed factory firmware enumerated as VID 2886 on COM6). First flash needed manual download mode
+(hold B, tap R); afterwards the chip kept rebooting into the ROM loader (`boot:0x0 (DOWNLOAD)`, "waiting for download")
+until R was pressed once by itself -- after that, arduino-cli's automatic reset works. Its USB console (hardware CDC)
+sends NOTHING until the host sets DTR, and opening the port restarts the chip. The AT commands also work on the USB
+console now (`tools/lisanet_client/xiao_term.ps1` is a PowerShell terminal for it; arduino-cli `monitor` could not
+find its serial monitor from Git Bash). AT+WSCAN saw 17 networks; joined `Joshua`; web page answers 401 without the
+password, at lisanet.local = 192.168.0.128. Wired to J21 (D0->GPIO2 green, D1->GPIO3 yellow, D7->GPIO4 orange,
+D6->GPIO5 red, GND brown; 3V3 unconnected, XIAO on its own USB) with the J21 build JTAG-loaded: **AT+SDINFO returned
+ESFloppy's firmware string and card size through the FPGA at 2 Mbaud** -- the whole option-B data path works.
 **"ESFloppy's button doesn't mount a disk" -- SOLVED (2026-10-11), not a button or FPGA problem.** With the OLED dead,
 a "virtual OLED" build of ESFloppy (local `lisanet` branch, uncommitted: `lisanetLogUi()` in `ui.cpp` plus
 `filePickerDescribe()` in `uiFilePicker.cpp`) logs button presses, screen changes, the file picker highlight, error

@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------------------------
 // atmodem -- AT commands on the Lisa's Serial A (9600 8N1). Written with an AI assistant.
-// Every exchange is mirrored on the XIAO's USB console (115200) for debugging.
+// The same commands also work on the XIAO's USB console (115200), for setting it up from a PC; every response goes to both.
 //
 //   AT                       OK
 //   ATI                      version information
@@ -34,8 +34,6 @@ namespace atmodem {
 static HardwareSerial *lisa = nullptr;
 static Preferences nvs;
 static bool echoOn = true;
-static char line[MAX_LINE + 1];
-static size_t lineLen = 0;
 
 // ---- Output: everything goes to the Lisa and is mirrored on the USB console ----------------------
 static void out(const char *s) {
@@ -241,27 +239,38 @@ static void runCommand(char *cmd) {
     else                                       error("unknown command, try AT+HELP");
 }
 
-// Line editing for one received byte; runs the command on CR
-static void feed(char ch) {
-    if (ch == '\n') return;                          // CR ends a line; ignore the LF of a CR LF pair
-    if (ch == '\r') {
-        if (echoOn) lisa->print("\r\n");
-        line[lineLen] = 0;
-        runCommand(line);
-        lineLen = 0;
+// Commands arrive from the Lisa and from the XIAO's own USB console (for bench setup from a PC). Each source has its own
+// line buffer and gets its own echo; responses go to both.
+struct Source {
+    Stream *port;
+    char line[MAX_LINE + 1];
+    size_t len;
+};
+static Source fromLisa = {}, fromUsb = {};
+
+// Line editing for one received byte; runs the command on CR (or LF, which is what a PC terminal usually sends)
+static void feed(Source &src, char ch) {
+    if (ch == '\r' || ch == '\n') {
+        if (ch == '\n' && src.len == 0) return;      // the LF of a CR LF pair
+        if (echoOn) src.port->print("\r\n");
+        src.line[src.len] = 0;
+        src.len = 0;
+        runCommand(src.line);
         return;
     }
     if (ch == 0x08 || ch == 0x7F) {                  // backspace / delete
-        if (lineLen) { lineLen--; if (echoOn) lisa->print("\b \b"); }
+        if (src.len) { src.len--; if (echoOn) src.port->print("\b \b"); }
         return;
     }
-    if (ch < 0x20 || lineLen >= MAX_LINE) return;
-    line[lineLen++] = ch;
-    if (echoOn) lisa->write((uint8_t)ch);
+    if (ch < 0x20 || src.len >= MAX_LINE) return;
+    src.line[src.len++] = ch;
+    if (echoOn) src.port->write((uint8_t)ch);
 }
 
 void begin(HardwareSerial &port) {
     lisa = &port;
+    fromLisa.port = lisa;
+    fromUsb.port = &Serial;
     lisa->setRxBufferSize(1024);                     // the loop can be busy for a while serving a web upload
     lisa->begin(LISA_BAUD, SERIAL_8N1, LISA_RX_PIN, LISA_TX_PIN);
     nvs.begin(NVS_NAMESPACE, false);
@@ -278,7 +287,8 @@ void begin(HardwareSerial &port) {
 }
 
 void poll() {
-    while (lisa->available()) feed((char)lisa->read());
+    while (lisa->available()) feed(fromLisa, (char)lisa->read());
+    while (Serial.available()) feed(fromUsb, (char)Serial.read());
 }
 
 }  // namespace atmodem
