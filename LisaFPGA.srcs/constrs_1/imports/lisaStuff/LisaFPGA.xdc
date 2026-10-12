@@ -274,6 +274,8 @@ set_false_path -to [get_cells {speed_menu_int_reg[*]}]
 ## inf / are absent from the Inter Clock Table, rather than trusting the absence of a warning.
 set_false_path -to [get_cells esp_mode_sys_int_reg]
 set_false_path -to [get_cells esp_mode_dot_int_reg]
+## The WIFI FDD / WIFI HDD target flag, synchronised into sysclk_fabric the same way.
+set_false_path -to [get_cells esp_hdd_sys_int_reg]
 
 ## We do use the framerate select signals in some other places though, so they're fed through synchronizers in those cases
 ## We need false paths for those too
@@ -525,6 +527,9 @@ set_property -dict {PACKAGE_PIN G17 IOSTANDARD LVCMOS33} [get_ports FLOPPY_SRC]
 set_property -dict {PACKAGE_PIN C15 IOSTANDARD LVCMOS33} [get_ports {ESPROFILE_COMM_BUS[0]}]
 set_property -dict {PACKAGE_PIN D15 IOSTANDARD LVCMOS33} [get_ports {ESPROFILE_COMM_BUS[1]}]
 set_property -dict {PACKAGE_PIN E16 IOSTANDARD LVCMOS33} [get_ports {ESPROFILE_COMM_BUS[2]}]
+## [2] is ESProFile's serial TX in WIFI HDD mode and is never driven by the FPGA; pulled up to idle at mark, exactly
+## like ESFLOPPY_COMM_BUS[5]. [0] (MODE) and [1] (link into ESProFile) are always driven.
+set_property PULLTYPE PULLUP [get_ports {ESPROFILE_COMM_BUS[2]}]
 set_property -dict {PACKAGE_PIN E15 IOSTANDARD LVCMOS33} [get_ports _CMD_ESPROFILE]
 set_property -dict {PACKAGE_PIN A18 IOSTANDARD LVCMOS33} [get_ports _BSY_ESPROFILE]
 set_property -dict {PACKAGE_PIN B18 IOSTANDARD LVCMOS33} [get_ports R_W_ESPROFILE]

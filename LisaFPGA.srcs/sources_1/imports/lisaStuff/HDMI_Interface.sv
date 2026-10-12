@@ -42,9 +42,13 @@ module HDMI_Interface #(
     // The menu's CPU SPEED choice, clk_pixel domain: {menu owns it, speed index 0-3 = 5/10/15/18.75MHz}.
     // Bit 2 low means "follow the SPEED SELECT switches". top.sv synchronises it into the dot clock domain.
     output logic [2:0]  cpu_speed,
-    // The menu's ESP32 MODE choice, clk_pixel domain: 0 = FLOPPY (ESFloppy, the default), 1 = WIFI (the ESP32
-    // becomes a virtual modem on Serial A). Persisted in settings bit 72. top.sv synchronises it before use.
+    // The menu's ESP32 MODE choice, clk_pixel domain. esp_wifi_mode: 0 = FLOPPY (the default), 1 = WIFI (Serial A goes
+    // to the WiFi board on J21, and one of the board's ESP32s becomes its SD-card server). esp_target_hdd picks which:
+    // 0 = ESFloppy's card (WIFI FDD), 1 = ESProFile's card (WIFI HDD -- the Lisa's hard disk is offline meanwhile).
+    // esp_target_hdd is only ever 1 while esp_wifi_mode is. Persisted in settings bits 72 and 73; top.sv synchronises
+    // both.
     output logic        esp_wifi_mode = 1'b0,
+    output logic        esp_target_hdd = 1'b0,
 
     // ESFloppy control buttons, active low. Only read when ALIGNMENT_TUNING_MODE is set; ignored otherwise.
     input logic btn_left,
@@ -636,7 +640,7 @@ module HDMI_Interface #(
     // button press. Called only from the always_ff below, so these registers keep a single driver.
     task automatic start_save();
         settings_save_data <= {
-            {7'b0, esp_wifi_mode, speed_user_set, speed_idx, 1'b1, video_mode, contrast_override_menu, scanlines_override},
+            {6'b0, esp_target_hdd, esp_wifi_mode, speed_user_set, speed_idx, 1'b1, video_mode, contrast_override_menu, scanlines_override},
             {5'b0, v_offset_1024},
             {5'b0, h_offset_1024},
             {5'b0, v_offset_1080p},
@@ -693,6 +697,7 @@ module HDMI_Interface #(
                     // Bit 72 was the old block's reserved byte, always written as 0, so a block saved before
                     // ESP32 MODE existed loads as FLOPPY (and its checksum still matches).
                     esp_wifi_mode <= settings_data[72];
+                    esp_target_hdd <= settings_data[73] & settings_data[72];  // bit 73 is 0 in older blocks too
                     // A saved CPU speed takes over from the switches, as a saved resolution does from the
                     // jumper. Blocks saved before this existed have bit 71 clear, so they keep the switches.
                     if (settings_data[71]) begin
@@ -772,9 +777,14 @@ module HDMI_Interface #(
                                 else                        speed_idx <= speed_idx + 1'b1;
                             end
                             3'd4: contrast_override_menu <= ~contrast_override_menu;   // MAX CONTRAST
-                            // ESP32 MODE: FLOPPY <-> WIFI. Takes effect at once (the ESP32 restarts into the other
-                            // personality); it is only remembered across a power cycle if SAVE SETTINGS is used.
-                            3'd5: esp_wifi_mode <= ~esp_wifi_mode;
+                            // ESP32 MODE: FLOPPY -> WIFI FDD -> WIFI HDD -> FLOPPY. Takes effect at once (the chosen
+                            // ESP32 restarts into its SD-server personality); it is only remembered across a power
+                            // cycle if SAVE SETTINGS is used.
+                            3'd5: begin
+                                if (!esp_wifi_mode)       esp_wifi_mode  <= 1'b1;
+                                else if (!esp_target_hdd) esp_target_hdd <= 1'b1;
+                                else begin                esp_wifi_mode  <= 1'b0; esp_target_hdd <= 1'b0; end
+                            end
                             3'd6: start_save();                                         // SAVE SETTINGS
                             default: menu_active <= 1'b0;                              // EXIT
                         endcase
@@ -1152,7 +1162,8 @@ module HDMI_Interface #(
             13: menu_value = "   15MHZ";
             14: menu_value = "18.75MHZ";
             15: menu_value = "  FLOPPY"; // ESP32 MODE: ESFloppy floppy emulator (default)
-            16: menu_value = "    WIFI"; // ESP32 MODE: ESP32 is a WiFi virtual modem on Serial A
+            16: menu_value = "WIFI FDD"; // ESP32 MODE: WiFi board on Serial A, managing ESFloppy's SD card
+            17: menu_value = "WIFI HDD"; // ESP32 MODE: WiFi board on Serial A, managing ESProFile's SD card
             default: menu_value = "        ";
         endcase
     endfunction
@@ -1173,7 +1184,7 @@ module HDMI_Interface #(
             for (int j = 0; j < 16; j = j + 1) label_rom[i*16 + j] = ascii_glyph(label_tmp[8*(15-j) +: 8]);
         end
         // Value strings: blank, 1080P30, 1024X768, ON, OFF, 1080P60, SAVED, DEFAULT, SAVING, NO ROOM, and the
-        // five CPU SPEED values, FLOPPY and WIFI.
+        // five CPU SPEED values, FLOPPY, WIFI FDD and WIFI HDD.
         // Fill all 32 slots (menu_value's default is blank) so no index can read an uninitialised entry.
         for (int i = 0; i < 32; i = i + 1) begin
             value_tmp = menu_value(i);
@@ -1267,7 +1278,7 @@ module HDMI_Interface #(
             3'd2: m_vid = (v_limit == 11'd0) ? 4'd9 : 4'd0;       // ADJUST VERT: NO ROOM where it can't move
             3'd3: m_vid = speed_user_set ? (4'd11 + 4'(speed_idx)) : 4'd10; // CPU SPEED
             3'd4: m_vid = contrast_eff  ? 4'd3 : 4'd4;
-            3'd5: m_vid = esp_wifi_mode ? 5'd16 : 5'd15;          // ESP32 MODE: WIFI / FLOPPY
+            3'd5: m_vid = esp_wifi_mode ? (esp_target_hdd ? 5'd17 : 5'd16) : 5'd15; // ESP32 MODE
             // SAVING wins over both, so a repeat save on an already-saved board still shows something happening
             3'd6: m_vid = save_active ? 4'd8 : (settings_valid_q ? 4'd6 : 4'd7);
             default: m_vid = 4'd0;                        // EXIT has no value

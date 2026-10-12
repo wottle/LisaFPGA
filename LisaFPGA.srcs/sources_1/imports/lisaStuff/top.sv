@@ -704,24 +704,38 @@ module top(
     );
 
     // ---------------------------------------------------------------------------------------------
-    // ESP32 MODE: the on-screen menu switches between FLOPPY (ESFloppy, the default) and WIFI. See
+    // ESP32 MODE: the on-screen menu picks FLOPPY (the default), WIFI FDD or WIFI HDD. See
     // docs/superpowers/specs/2026-10-10-esp32-wifi-mode-design.md.
     //
     // The board's own ESP32s have no antenna (LNA_IN is unconnected on the rev 3 PCB), so WIFI mode uses an EXTERNAL
-    // antenna-equipped ESP32 board (e.g. a XIAO ESP32S3) on header J21, and ESFloppy's ESP32 becomes its SD-card
-    // server. In WIFI mode:
-    //   ESFLOPPY_COMM_BUS[3]  MODE, FPGA -> ESFloppy, 1 = WIFI. ESFloppy restarts into its SD-server personality.
+    // antenna-equipped ESP32 board (a XIAO ESP32S3) on header J21. One of the board's ESP32s becomes its SD-card
+    // server: ESFloppy in WIFI FDD, ESProFile in WIFI HDD (so the Lisa's hard disk is offline in WIFI HDD). In both:
     //   GPIO[2] (J21 pin 5)   Lisa Serial A data out (the SCC's TXDA) -> WiFi board
     //   GPIO[3] (J21 pin 7)   WiFi board -> the SCC's RXDA                         (XDC pull-up: idles at mark)
-    //   GPIO[4] (J21 pin 2)   ESFloppy -> WiFi board: ESFLOPPY_COMM_BUS[5] passed straight through
-    //   GPIO[5] (J21 pin 4)   WiFi board -> ESFloppy: onto ESFLOPPY_COMM_BUS[4]    (XDC pull-up: idles at mark)
-    // The ESFloppy <-> WiFi board link is a plain wire through the FPGA (no SCC, no clock), so it can run at megabaud.
-    // ESFLOPPY_COMM_BUS[5] is NEVER driven by the FPGA (XDC pull-up), so ESFloppy can't fight the FPGA for it during
-    // a mode change. In FLOPPY mode the FPGA drives none of GPIO[5:2] and holds ESFLOPPY_COMM_BUS[4:3] at 0, as
-    // they always were. SCC channel A is cut off from the physical Serial A pins in WIFI mode, with CTS, DCD and DSR
-    // held asserted (no hardware flow control yet); the physical TXDA pin is parked at mark. Serial B is untouched.
+    //   GPIO[4] (J21 pin 2)   SD server -> WiFi board
+    //   GPIO[5] (J21 pin 4)   WiFi board -> SD server                              (XDC pull-up: idles at mark)
+    // and, per target:
+    //                         ESFloppy (WIFI FDD)                ESProFile (WIFI HDD)
+    //   MODE, 1 = serve       ESFLOPPY_COMM_BUS[3] (its GPIO37)  ESPROFILE_COMM_BUS[0] (its GPIO36)
+    //   WiFi board -> it      ESFLOPPY_COMM_BUS[4] (GPIO38)      ESPROFILE_COMM_BUS[1] (GPIO37)
+    //   it -> WiFi board      ESFLOPPY_COMM_BUS[5] (GPIO39)      ESPROFILE_COMM_BUS[2] (GPIO38)
+    // The link is a plain wire through the FPGA (no SCC, no clock), so it can run at megabaud. The "it -> WiFi board"
+    // lines are NEVER driven by the FPGA (XDC pull-ups), so an ESP32 can't fight the FPGA for them during a mode
+    // change. Whichever ESP32 is not the target sees its MODE and link-input lines held at 0, as in FLOPPY mode.
+    // ESPROFILE_COMM_BUS was a hard-coded 3'b101 that ESProFile's firmware never read. SCC channel A is cut off from
+    // the physical Serial A pins in both WIFI modes, with CTS, DCD and DSR held asserted (no hardware flow control
+    // yet); the physical TXDA pin is parked at mark. Serial B is untouched.
     // ---------------------------------------------------------------------------------------------
     logic esp_wifi_mode_menu;   // clk_pixel domain, straight from the menu
+    logic esp_target_hdd_menu;  // clk_pixel domain: 0 = ESFloppy, 1 = ESProFile; only ever 1 in WIFI
+    // Only the MODE pins and the link mux need the target, so it is synchronised into sysclk alone. The two flags
+    // cross independently; a mode change can show a mixed state for one clock, far shorter than the 300 ms an ESP32
+    // waits before acting on its MODE line.
+    (* ASYNC_REG = "TRUE" *) logic esp_hdd_sys_int, esp_hdd_sys;
+    always_ff @(posedge sysclk_fabric) begin
+        esp_hdd_sys_int <= esp_target_hdd_menu;
+        esp_hdd_sys     <= esp_hdd_sys_int;
+    end
     // Two destinations, two synchronisers. The MODE pin follows sysclk, which runs whether or not the Lisa is
     // switched on (so a saved WIFI mode reaches the ESP32 at power-up). The SCC mux follows DOTCK, the SCC's own
     // clock. Only the level crosses, and it changes at human speed.
@@ -744,15 +758,23 @@ module top(
     assign dcda_core  = esp_mode_dot ? 1'b0 : DCDA;
     assign synca_core = esp_mode_dot ? 1'b0 : SYNCA;                     // DSR, active low: asserted
 
+    logic serve_fdd, serve_hdd;                                          // which ESP32 is the SD server
+    assign serve_fdd = esp_mode_sys & ~esp_hdd_sys;
+    assign serve_hdd = esp_mode_sys &  esp_hdd_sys;
+
     assign GPIO[2] = esp_mode_dot ? txda_core : 1'bz;                    // Lisa Serial A -> WiFi board
-    assign GPIO[4] = esp_mode_sys ? ESFLOPPY_COMM_BUS[5] : 1'bz;         // ESFloppy -> WiFi board
+    assign GPIO[4] = serve_fdd ? ESFLOPPY_COMM_BUS[5]                    // SD server -> WiFi board
+                   : serve_hdd ? ESPROFILE_COMM_BUS[2] : 1'bz;
     assign GPIO[3] = 1'bz;                                               // inputs only
     assign GPIO[5] = 1'bz;
     assign GPIO[1:0] = 2'bzz;                                            // jumper inputs, never driven
 
-    assign ESFLOPPY_COMM_BUS[3] = esp_mode_sys;
-    assign ESFLOPPY_COMM_BUS[4] = esp_mode_sys ? GPIO[5] : 1'b0;         // WiFi board -> ESFloppy
+    assign ESFLOPPY_COMM_BUS[3] = serve_fdd;
+    assign ESFLOPPY_COMM_BUS[4] = serve_fdd ? GPIO[5] : 1'b0;            // WiFi board -> ESFloppy
     // ESFLOPPY_COMM_BUS[5] deliberately has no driver (see above)
+    assign ESPROFILE_COMM_BUS[0] = serve_hdd;
+    assign ESPROFILE_COMM_BUS[1] = serve_hdd ? GPIO[5] : 1'b0;           // WiFi board -> ESProFile
+    assign ESPROFILE_COMM_BUS[2] = 1'bz;                                 // ESProFile -> WiFi board: never driven
 
     HDMI_Interface #(
         .OUTPUT_1024X768(OUTPUT_1024X768),
@@ -772,6 +794,7 @@ module top(
         .settings_save_req(settings_save_req),
         .cpu_speed(cpu_speed_menu),
         .esp_wifi_mode(esp_wifi_mode_menu),
+        .esp_target_hdd(esp_target_hdd_menu),
         .jedec_id(settings_dbg_word),
         .btn_left(LEFT_ESFLOPPY),
         .btn_ok(OK_ESFLOPPY),
@@ -1492,8 +1515,8 @@ module top(
         // Pull it low whenever _CRES_out is low; otherwise make it high-Z and a pullup will take it high
         .T(_CRES_out_ExtProFile)
     );
-    // For now, just hard-code something to the "ESProFile comm bus"
-    assign ESPROFILE_COMM_BUS = 3'b101;
+    // The "ESProFile comm bus" carries ESP32 MODE = WIFI HDD; see the ESP32 MODE block near the HDMI_Interface
+    // instance, where all three lines are driven.
     // And now we just have to mux all that, along with some unidirectional control signals
     // This depends on the state of the HDD_SRC switch
     always_comb begin

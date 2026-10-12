@@ -100,6 +100,22 @@ find its serial monitor from Git Bash). AT+WSCAN saw 17 networks; joined `Joshua
 password, at lisanet.local = 192.168.0.128. Wired to J21 (D0->GPIO2 green, D1->GPIO3 yellow, D7->GPIO4 orange,
 D6->GPIO5 red, GND brown; 3V3 unconnected, XIAO on its own USB) with the J21 build JTAG-loaded: **AT+SDINFO returned
 ESFloppy's firmware string and card size through the FPGA at 2 Mbaud** -- the whole option-B data path works.
+**WIFI HDD: managing ESProFile's card too (2026-10-12, in progress).** ESP32 MODE is now FLOPPY -> WIFI FDD -> WIFI HDD
+(`esp_wifi_mode` + new `esp_target_hdd`, settings bits 72/73). ESProFile has three FPGA lines, `ESPROFILE_COMM_BUS[2:0]`
+(FPGA C15/D15/E16 -> its GPIO36/37/38, found in the netlist's PAD_NET entries for U16 pins 41-43), which were a hard-coded
+`3'b101` that its firmware never read. They now carry MODE / link in / link out exactly like ESFloppy's [5:3], and the
+J21 link is muxed to whichever ESP32 is serving. The Lisa has no hard disk in WIFI HDD. ESProFile firmware: local clone
+`Development\ESProFile`, branch `lisanet` (sdServer ported from ESFloppy; boot check in `setup()`; `lisanetIdlePoll()`
+in the emulator's idle wait, timed with the CPU cycle counter because the emulator runs with interrupts OFF). **Because
+old bitstreams hold MODE high (`3'b101`), a request also needs the link input seen high** -- the real WIFI HDD path
+always idles high; the old constant holds it low. **Regression PASSED on hardware: with the new ESProFile firmware on an
+old bitstream, the LED goes green and the Lisa boots from the hard disk.**
+**ESProFile flash reads fail on ONE block: `0x87000` always gives esptool's "Packet content transfer stopped"** (the
+stub's fast read path; data-dependent). Every other block reads fine, and `--no-stub` (ROM loader) reads 0x87000
+reliably. So back it up in 512 KB pieces, falling back to 4 KB pieces and then `--no-stub` for a failing piece. This is
+almost certainly what "hung" ESProFile in October: its reads were aborting, not the chip failing. Backup:
+`tools/esp32_wifi_test/backup/esprofile_flash_backup.bin`, two passes identical, SHA-256 `16f890c0...`. Each esptool call
+resets ESProFile, so its LED flashes red during a backup; that is expected.
 **"ESFloppy's button doesn't mount a disk" -- SOLVED (2026-10-11), not a button or FPGA problem.** With the OLED dead,
 a "virtual OLED" build of ESFloppy (local `lisanet` branch, uncommitted: `lisanetLogUi()` in `ui.cpp` plus
 `filePickerDescribe()` in `uiFilePicker.cpp`) logs button presses, screen changes, the file picker highlight, error

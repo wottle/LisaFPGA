@@ -7,6 +7,8 @@
 //
 // API (all paths absolute, as in docs/lisanet_link_protocol.md):
 //   GET  /                          the page
+//   GET  /api/hello                 {"fw":"..."}: which board's card this is (ESFloppy or ESProFile, from the
+//                                   LisaFPGA menu's WIFI FDD / WIFI HDD)
 //   GET  /api/info                  {"card":bytes,"free":bytes,"fw":"..."}  (free space needs a FAT scan: ~10 s)
 //   GET  /api/ls?path=/             {"path":"/","entries":[{"n":name,"d":0|1,"s":size},...]}
 //   GET  /api/get?path=/x.dc42      the file
@@ -92,6 +94,15 @@ static String baseName(const String &path) {
 static void handlePage() {
     if (!authorized()) return;
     server.send(200, "text/html; charset=utf-8", PAGE);
+}
+
+static void handleHello() {
+    if (!authorized()) return;
+    String fw;
+    int s = sdlink::hello(fw);
+    if (s != sdlink::OK) { sendError(s); return; }
+    markGood();
+    server.send(200, "application/json", "{\"fw\":\"" + jsonEscape(fw) + "\"}");
 }
 
 static void handleInfo() {
@@ -250,6 +261,7 @@ void begin() {
     const char *keep[] = {"X-Path"};
     server.collectHeaders(keep, 1);
     server.on("/", HTTP_GET, handlePage);
+    server.on("/api/hello", HTTP_GET, handleHello);
     server.on("/api/info", HTTP_GET, handleInfo);
     server.on("/api/ls", HTTP_GET, handleLs);
     server.on("/api/get", HTTP_GET, handleGet);

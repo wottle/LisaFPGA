@@ -22,7 +22,7 @@ th.c,td.c{width:28px;padding-right:0}button:disabled{opacity:.45;cursor:default}
 progress{width:200px}.mn{font-size:11px;color:var(--acc);border:1px solid var(--acc);border-radius:4px;padding:0 4px;margin-left:6px}
 @media (max-width:600px){td.c{padding-left:6px}td.s{display:none}td.a button,td.a .btn{padding:2px 5px}}
 </style></head><body><main>
-<h1>LisaNet</h1><div class="mut sp"><span id="info">Card space</span> <button id="infob" class="mini" title="Recalculate card space">&#x21bb;</button></div>
+<h1>LisaNet <span class="mut" id="who"></span></h1><div class="mut sp"><span id="info">Card space</span> <button id="infob" class="mini" title="Recalculate card space">&#x21bb;</button></div>
 <div id="msg"></div>
 <div class="bar"><span class="crumb" id="crumb"></span></div>
 <div class="bar">
@@ -32,16 +32,16 @@ progress{width:200px}.mn{font-size:11px;color:var(--acc);border:1px solid var(--
 </div>
 <div class="mut" id="mnext"></div>
 <table><thead><tr><th class="c"><input type="checkbox" id="all" title="Select all"></th><th>Name</th><th class="s">Size</th><th></th></tr></thead><tbody id="list"></tbody></table>
-<p class="mut">Disk images (.dc42, .image, .img) must be stored contiguously; uploads here always are. "Mount next" makes
+<p class="mut" id="mnhelp">Disk images (.dc42, .image, .img) must be stored contiguously; uploads here always are. "Mount next" makes
 ESFloppy insert that image in drive 1 every time it starts in FLOPPY mode, until cleared.</p>
 </main><script>
-let cwd='/',mountNext='',names=new Set();
+let cwd='/',mountNext='',names=new Set(),profile=false;
 const $=id=>document.getElementById(id);
 const join=(d,n)=>(d.endsWith('/')?d:d+'/')+n;
 const isImg=n=>/\.(dc42|image|img)$/i.test(n);
 function msg(t,bad){const m=$('msg');m.textContent=t;m.className=t?(bad?'err':'ok'):'';}
 async function api(url,opt){const r=await fetch(url,opt);let j={};try{j=await r.json()}catch(e){}
- if(!r.ok)throw new Error(r.status==503?'ESFloppy is not reachable: set ESP32 MODE to WIFI in the LisaFPGA menu.':(j.error||('HTTP '+r.status)));return j;}
+ if(!r.ok)throw new Error(r.status==503?'No SD card server is reachable: set ESP32 MODE to WIFI FDD or WIFI HDD in the LisaFPGA menu.':(j.error||('HTTP '+r.status)));return j;}
 function size(b){if(b<1024)return b+' B';if(b<1048576)return (b/1024).toFixed(1)+' KB';if(b<1073741824)return (b/1048576).toFixed(1)+' MB';return (b/1073741824).toFixed(2)+' GB';}
 function crumbs(){const c=$('crumb');c.innerHTML='';const parts=cwd.split('/').filter(Boolean);
  const add=(t,p)=>{const a=document.createElement('a');a.href='#';a.textContent=t;a.onclick=e=>{e.preventDefault();go(p)};c.append(a)};
@@ -49,7 +49,9 @@ function crumbs(){const c=$('crumb');c.innerHTML='';const parts=cwd.split('/').f
 function selected(){return [...document.querySelectorAll('input.sel:checked')].map(c=>c.dataset.n);}
 function selChanged(){const n=selected().length;$('move').disabled=!n;$('move').textContent=n?'Move '+n+' selected...':'Move selected...';}
 async function load(){msg('');crumbs();const tb=$('list');tb.innerHTML='<tr><td colspan=4 class=mut>Loading...</td></tr>';$('all').checked=false;
- try{const [l,m]=await Promise.all([api('/api/ls?path='+encodeURIComponent(cwd)),api('/api/mountnext')]);mountNext=m.path||'';
+ try{const [h,l,m]=await Promise.all([api('/api/hello'),api('/api/ls?path='+encodeURIComponent(cwd)),api('/api/mountnext')]);mountNext=m.path||'';
+  profile=/ESProFile/i.test(h.fw);$('who').textContent=profile?'- ESProFile hard disk card':'- ESFloppy floppy card';
+  $('mnhelp').hidden=profile;
   $('mnext').textContent=mountNext?'Mount next: '+mountNext:'';names=new Set(l.entries.map(e=>e.n));
   const es=l.entries.filter(e=>!e.n.startsWith('._')).sort((a,b)=>(b.d-a.d)||a.n.localeCompare(b.n));tb.innerHTML='';
   if(cwd!=='/')es.unshift({n:'..',d:1,up:1});
@@ -64,7 +66,7 @@ async function load(){msg('');crumbs();const tb=$('list');tb.innerHTML='<tr><td 
    const ta=document.createElement('td');ta.className='a';
    if(!e.up){
     if(!e.d){const d=document.createElement('a');d.className='btn';d.textContent='Download';d.href='/api/get?path='+encodeURIComponent(p);ta.append(d,' ');}
-    if(!e.d&&isImg(e.n)){const b=document.createElement('button');b.textContent=p===mountNext?'Clear mount':'Mount next';
+    if(!e.d&&!profile&&isImg(e.n)){const b=document.createElement('button');b.textContent=p===mountNext?'Clear mount':'Mount next';
      b.onclick=()=>act('/api/mountnext?path='+encodeURIComponent(p===mountNext?'':p));ta.append(b,' ');}
     const r=document.createElement('button');r.textContent='Rename';r.onclick=async()=>{const n=prompt('New name',e.n);if(!n||n===e.n)return;const to=join(cwd,n);
      try{await api('/api/mv?from='+encodeURIComponent(p)+'&to='+encodeURIComponent(to),{method:'POST'});
@@ -97,7 +99,7 @@ function upload(f){return new Promise((res,rej)=>{const x=new XMLHttpRequest();x
  x.setRequestHeader('X-Path',encodeURIComponent(join(cwd,f.name)));x.setRequestHeader('Content-Type','application/octet-stream');
  x.upload.onprogress=e=>{$('prog').max=e.total;$('prog').value=e.loaded;$('progt').textContent=f.name+' '+size(e.loaded)+' / '+size(e.total)};
  x.onload=()=>{let j={};try{j=JSON.parse(x.responseText)}catch(e){}
-  x.status==200?res():rej(new Error(x.status==503?'ESFloppy is not reachable: set ESP32 MODE to WIFI.':x.status==507?'No contiguous space on the card for '+f.name:(j.error||'HTTP '+x.status)))};
+  x.status==200?res():rej(new Error(x.status==503?'No SD card server is reachable: set ESP32 MODE to WIFI FDD or WIFI HDD.':x.status==507?'No contiguous space on the card for '+f.name:(j.error||'HTTP '+x.status)))};
  x.onerror=()=>rej(new Error('Upload failed'));x.send(f);});}
 $('file').onchange=async e=>{const fs=[...e.target.files];e.target.value='';$('prog').hidden=false;
  try{for(const f of fs)await upload(f);msg('Uploaded '+fs.length+' file(s)');}catch(err){msg(err.message,1);}
