@@ -15,6 +15,10 @@
 //   POST /api/put                   raw body, header X-Path: URL-encoded destination. Space is reserved contiguously
 //                                   first (OPEN mode 3), because ESFloppy only mounts unfragmented images.
 //   POST /api/rm?path=  /api/mkdir?path=  /api/mv?from=&to=
+//   POST /api/copystart?from=&to=[&replace=1&backup=]  {"total":bytes}: an on-card copy, staged and reserved
+//                                   contiguously; with replace=1 an existing target is renamed to backup (or deleted)
+//                                   and replaced in one step when the copy completes
+//   POST /api/copystep              {"copied":bytes,"total":bytes}: up to 1 MB more; repeat until copied == total
 //   GET  /api/mountnext             {"path":"..."};   POST /api/mountnext?path=   (empty clears)
 // Errors are {"error":"..."} with 503 when ESFloppy can't be reached (ESP32 MODE not set to WIFI).
 //
@@ -27,6 +31,7 @@
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
+#include "wifisetup.h"
 
 namespace web {
 
@@ -36,12 +41,14 @@ static bool mdnsStarted = false;
 static uint8_t buf[sdlink::MAX_DATA];
 
 extern const char PAGE[];
+extern const char SETUP_PAGE[];
 
 // ---- Helpers -----------------------------------------------------------------------------------
 static bool authorized() {
     String pass = nvs.getString("webpass", "");
     if (!pass.length()) {
-        server.send(403, "text/plain", "Locked: set a password first from the Lisa with AT+WEBPASS=\"password\"\n");
+        server.send(403, "text/plain", "Locked: no web password yet. Set one on the setup page (join the WiFi network "
+                    SETUP_AP_SSID ", password " SETUP_AP_PASS "), or from the Lisa with AT+WEBPASS=\"password\".\n");
         return false;
     }
     if (!server.authenticate(WEB_USER, pass.c_str())) {
@@ -90,8 +97,95 @@ static String baseName(const String &path) {
     return i >= 0 ? path.substring(i + 1) : path;
 }
 
+// ---- Setup network (see wifisetup.h) -------------------------------------------------------------
+// Did this request arrive over the setup network rather than the home network?
+static bool viaSetupNetwork() {
+    return wifisetup::apActive() && server.client().localIP() == WiFi.softAPIP();
+}
+
+// Phones probe a fixed URL when they join a network; answering every unknown URL on the setup network with a
+// redirect makes them pop up the setup page by themselves.
+static void redirectToSetup() {
+    server.sendHeader("Location", "http://" + WiFi.softAPIP().toString() + "/setup");
+    server.send(302, "text/plain", "");
+}
+
+// The setup network's password is public, so once a web password exists the setup page starts with a login form for
+// it -- otherwise anyone nearby could take the board over while its network is down. It is a form, not HTTP Basic
+// auth, because phones' captive-portal windows never show a Basic auth prompt: they just sit on a blank page. A good
+// login returns a session token that the scan and save requests must carry. A board with no web password yet (fresh,
+// or reset with the B button) skips the login, which is what lets first-time setup work at all.
+static String setupToken;                                     // valid until the next login or restart
+
+static bool setupTokenOk() {
+    if (!nvs.getString("webpass", "").length()) return true;
+    if (setupToken.length() && server.arg("t") == setupToken) return true;
+    server.send(403, "application/json", "{\"error\":\"Log in first\"}");
+    return false;
+}
+
+static void handleSetupPage() {
+    server.send(200, "text/html; charset=utf-8", SETUP_PAGE);
+}
+
+static void handleSetupInfo() {
+    server.send(200, "application/json",
+                String("{\"haveWebPass\":") + (nvs.getString("webpass", "").length() ? "true" : "false") + "}");
+}
+
+static void handleSetupLogin() {
+    String current = nvs.getString("webpass", "");
+    if (current.length() && server.arg("password") != current) {
+        delay(1000);                                          // slows guessing
+        server.send(403, "application/json", "{\"error\":\"That password is not right\"}");
+        return;
+    }
+    char t[17];
+    snprintf(t, sizeof t, "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
+    setupToken = t;
+    server.send(200, "application/json", "{\"t\":\"" + setupToken + "\"}");
+}
+
+static void handleSetupScan() {
+    if (!setupTokenOk()) return;
+    int n = WiFi.scanNetworks();
+    String o = String("{\"haveWebPass\":") + (nvs.getString("webpass", "").length() ? "true" : "false") + ",\"nets\":[";
+    for (int i = 0; i < n; i++) {
+        if (WiFi.SSID(i).length() == 0) continue;           // hidden networks: type the name instead
+        if (o[o.length() - 1] == '}') o += ',';
+        o += "{\"s\":\"" + jsonEscape(WiFi.SSID(i)) + "\",\"r\":" + String(WiFi.RSSI(i)) + ",\"l\":" +
+             (WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "0" : "1") + "}";
+    }
+    o += "]}";
+    WiFi.scanDelete();
+    server.send(200, "application/json", o);
+}
+
+static void handleSetupSave() {
+    if (!setupTokenOk()) return;
+    String ssid = server.arg("ssid"), pass = server.arg("pass"), webpass = server.arg("webpass");
+    bool haveWebPass = nvs.getString("webpass", "").length() > 0;
+    if (!ssid.length()) { server.send(400, "application/json", "{\"error\":\"Choose a network\"}"); return; }
+    if (webpass.length() && webpass.length() < 4) {
+        server.send(400, "application/json", "{\"error\":\"The web password needs 4 or more characters\"}");
+        return;
+    }
+    if (!webpass.length() && !haveWebPass) {
+        server.send(400, "application/json", "{\"error\":\"Set a web password: it protects the SD card manager\"}");
+        return;
+    }
+    if (webpass.length()) nvs.putString("webpass", webpass);
+    server.send(200, "application/json", "{}");
+    wifisetup::requestJoin(ssid, pass);
+}
+
+static void handleSetupStatus() {
+    server.send(200, "application/json", wifisetup::statusJson());
+}
+
 // ---- Handlers ----------------------------------------------------------------------------------
 static void handlePage() {
+    if (viaSetupNetwork()) { redirectToSetup(); return; }
     if (!authorized()) return;
     server.send(200, "text/html; charset=utf-8", PAGE);
 }
@@ -205,12 +299,14 @@ static void handlePutBody() {
         case RAW_END:
             if (!up.authed) return;
             flushUpload();
+            // The server stages uploads: a completing CLOSE moves the file into place, replacing any old one in the
+            // same step; after a write error, abandon it so the old file (if any) stays as it was.
             if (up.status == sdlink::OK) up.status = sdlink::close();
+            else sdlink::close(true);
             break;
         case RAW_ABORTED:
             if (!up.authed) return;
-            sdlink::close();
-            if (up.status == sdlink::OK) sdlink::remove(up.path);   // don't leave a partly written image behind
+            sdlink::close(true);                               // discard the staged upload; the target is untouched
             up.status = sdlink::IO;
             break;
     }
@@ -235,6 +331,30 @@ static void handleMkdir() {
     sendStatus(sdlink::mkdir(server.arg("path")));
 }
 
+static void handleCopyStart() {
+    if (!authorized()) return;
+    if (!linkUp()) { sendError(sdlink::TIMEOUT); return; }
+    uint64_t total = 0;
+    // replace=1: the target may exist; on completion it is renamed to `backup` (or deleted if that is empty) and
+    // replaced in one step, so it is never missing or half-written even if the copy is cut short
+    int s = server.arg("replace") == "1"
+                ? sdlink::copyReplace(server.arg("from"), server.arg("to"), server.arg("backup"), total)
+                : sdlink::copyStart(server.arg("from"), server.arg("to"), total);
+    if (s != sdlink::OK) { sendError(s); return; }
+    markGood();
+    server.send(200, "application/json", "{\"total\":" + String((double)total, 0) + "}");
+}
+
+static void handleCopyStep() {
+    if (!authorized()) return;
+    uint64_t copied = 0, total = 0;
+    int s = sdlink::copyStep(copied, total);
+    if (s != sdlink::OK) { sendError(s); return; }
+    markGood();
+    server.send(200, "application/json",
+                "{\"copied\":" + String((double)copied, 0) + ",\"total\":" + String((double)total, 0) + "}");
+}
+
 static void handleMv() {
     if (!authorized()) return;
     if (!linkUp()) { sendError(sdlink::TIMEOUT); return; }
@@ -257,7 +377,7 @@ static void handleMountNextSet() {
 }
 
 void begin() {
-    nvs.begin(NVS_NAMESPACE, true);
+    nvs.begin(NVS_NAMESPACE, false);                 // read-write: the setup page can set the web password
     const char *keep[] = {"X-Path"};
     server.collectHeaders(keep, 1);
     server.on("/", HTTP_GET, handlePage);
@@ -268,10 +388,21 @@ void begin() {
     server.on("/api/put", HTTP_POST, handlePutDone, handlePutBody);
     server.on("/api/rm", HTTP_POST, handleRm);
     server.on("/api/mkdir", HTTP_POST, handleMkdir);
+    server.on("/api/copystart", HTTP_POST, handleCopyStart);
+    server.on("/api/copystep", HTTP_POST, handleCopyStep);
     server.on("/api/mv", HTTP_POST, handleMv);
     server.on("/api/mountnext", HTTP_GET, handleMountNextGet);
     server.on("/api/mountnext", HTTP_POST, handleMountNextSet);
-    server.onNotFound([]() { server.send(404, "text/plain", "Not found\n"); });
+    server.on("/setup", HTTP_GET, handleSetupPage);
+    server.on("/setup/info", HTTP_GET, handleSetupInfo);
+    server.on("/setup/login", HTTP_POST, handleSetupLogin);
+    server.on("/setup/scan", HTTP_GET, handleSetupScan);
+    server.on("/setup/save", HTTP_POST, handleSetupSave);
+    server.on("/setup/status", HTTP_GET, handleSetupStatus);
+    server.onNotFound([]() {
+        if (viaSetupNetwork()) { redirectToSetup(); return; }   // captive portal: phones' probe URLs land here
+        server.send(404, "text/plain", "Not found\n");
+    });
     server.begin();
 }
 

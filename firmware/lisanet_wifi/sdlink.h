@@ -25,10 +25,16 @@ int openRead(const String &path, uint64_t &size);
 int openWriteReserve(const String &path, uint64_t size);   // OPEN mode 3: contiguous, as ESFloppy requires
 int read(uint64_t offset, uint8_t *buf, size_t want, size_t &got);
 int write(uint64_t offset, const uint8_t *buf, size_t n);
-int close();
+int close(bool abandon = false);                          // abandon: discard a staged upload instead
 int remove(const String &path);
 int rename(const String &from, const String &to);
 int mkdir(const String &path);
+// On-card copy: copyStart reserves the destination (which must not exist); call copyStep until copied == total.
+int copyStart(const String &from, const String &to, uint64_t &total);
+// Like copyStart, but the target may exist: when the copy completes it is renamed to backup (deleted if backup is
+// empty) and replaced, in one step on the server, so the target is never missing or half-written.
+int copyReplace(const String &from, const String &to, const String &backup, uint64_t &total);
+int copyStep(uint64_t &copied, uint64_t &total);
 int mountNextSet(const String &path);                      // empty path clears it
 int mountNextGet(String &path);
 

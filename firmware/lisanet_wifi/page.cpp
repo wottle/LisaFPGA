@@ -19,6 +19,8 @@ a.dir{color:var(--acc);text-decoration:none;font-weight:600}.crumb a{color:var(-
 #msg.ok{display:block;background:color-mix(in srgb,var(--acc) 15%,transparent)}
 th.c,td.c{width:28px;padding-right:0}button:disabled{opacity:.45;cursor:default}button:disabled:hover{border-color:var(--line)}
 .sp{display:flex;align-items:center;gap:6px}button.mini{padding:0 6px;font-size:14px;line-height:20px}
+dialog{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:8px;max-width:440px}
+dialog::backdrop{background:rgba(0,0,0,.35)}dialog input{font:inherit;padding:3px 6px;max-width:100%}
 progress{width:200px}.mn{font-size:11px;color:var(--acc);border:1px solid var(--acc);border-radius:4px;padding:0 4px;margin-left:6px}
 @media (max-width:600px){td.c{padding-left:6px}td.s{display:none}td.a button,td.a .btn{padding:2px 5px}}
 </style></head><body><main>
@@ -31,6 +33,11 @@ progress{width:200px}.mn{font-size:11px;color:var(--acc);border:1px solid var(--
 <progress id="prog" max="1" value="0" hidden></progress><span class="mut" id="progt"></span>
 </div>
 <div class="mut" id="mnext"></div>
+<dialog id="pdlg"><p><b>profile.image already exists.</b> ESProFile boots from it, so it has to make way for
+<span id="psrc"></span>.</p>
+<p><label>Keep it, renamed to <input id="pname" size="26"></label></p>
+<div class="bar"><button id="pkeep">Rename it and copy</button><button id="pdisc" class="danger">Discard it and copy</button>
+<button id="pcancel">Cancel</button></div></dialog>
 <table><thead><tr><th class="c"><input type="checkbox" id="all" title="Select all"></th><th>Name</th><th class="s">Size</th><th></th></tr></thead><tbody id="list"></tbody></table>
 <p class="mut" id="mnhelp">Disk images (.dc42, .image, .img) must be stored contiguously; uploads here always are. "Mount next" makes
 ESFloppy insert that image in drive 1 every time it starts in FLOPPY mode, until cleared.</p>
@@ -68,6 +75,9 @@ async function load(){msg('');crumbs();const tb=$('list');tb.innerHTML='<tr><td 
     if(!e.d){const d=document.createElement('a');d.className='btn';d.textContent='Download';d.href='/api/get?path='+encodeURIComponent(p);ta.append(d,' ');}
     if(!e.d&&!profile&&isImg(e.n)){const b=document.createElement('button');b.textContent=p===mountNext?'Clear mount':'Mount next';
      b.onclick=()=>act('/api/mountnext?path='+encodeURIComponent(p===mountNext?'':p));ta.append(b,' ');}
+    if(!e.d&&profile&&/\.(image|img)$/i.test(e.n)&&p!==PROFILE){const b=document.createElement('button');b.textContent='Copy to profile.image';
+     b.title='ESProFile boots from /profile.image. This copies '+e.n+' there and leaves the original in place.';
+     b.onclick=()=>copyToProfile(p);ta.append(b,' ');}
     const r=document.createElement('button');r.textContent='Rename';r.onclick=async()=>{const n=prompt('New name',e.n);if(!n||n===e.n)return;const to=join(cwd,n);
      try{await api('/api/mv?from='+encodeURIComponent(p)+'&to='+encodeURIComponent(to),{method:'POST'});
       if(p===mountNext)await api('/api/mountnext?path='+encodeURIComponent(to),{method:'POST'});load();}catch(err){msg(err.message,1);}};
@@ -92,6 +102,35 @@ async function moveSelected(){const sel=selected();if(!sel.length)return;
   await load();msg('Moved '+sel.length+' item(s) to '+dest);
  }catch(e){await load();msg(e.message,1);}}
 $('move').onclick=moveSelected;
+// Copy to profile.image (ESProFile card): an on-card copy, so even a big image takes about a second per MB rather than
+// a trip through WiFi. An existing profile.image is renamed (kept) or discarded at the user's choice -- but only by the
+// server, at the very end, in the same step that moves the finished copy into place (the copy itself goes to a
+// temporary file). So if the copy is cut short, e.g. by the Lisa being switched on, the old profile.image is untouched.
+const PROFILE='/profile.image';
+function askProfile(src,suggest){return new Promise(res=>{const d=$('pdlg');$('psrc').textContent=src;$('pname').value=suggest;
+ $('pkeep').onclick=()=>{const n=$('pname').value.trim();if(!n)return;d.close();res({keep:n});};
+ $('pdisc').onclick=()=>{d.close();res({discard:1});};$('pcancel').onclick=()=>{d.close();res(null);};d.onclose=()=>res(null);d.showModal();});}
+async function copyToProfile(src){
+ try{
+  const root=await api('/api/ls?path=%2F');const have=new Set(root.entries.map(e=>e.n));
+  let start='/api/copystart?from='+encodeURIComponent(src)+'&to='+encodeURIComponent(PROFILE),backup='';
+  if(have.has('profile.image')){
+   let n=1;while(have.has('profile-backup-'+n+'.image'))n++;          // ESProFile's own backup naming
+   const c=await askProfile(src,'profile-backup-'+n+'.image');if(!c)return;
+   if(c.keep)backup=join('/',c.keep.replace(/^\/+/,''));
+   start+='&replace=1&backup='+encodeURIComponent(backup);              // empty backup = discard the old one
+  }
+  $('prog').hidden=false;$('prog').value=0;$('progt').textContent='Copying '+src+' to profile.image...';
+  const s=await api(start,{method:'POST'});
+  let c={copied:0,total:s.total};
+  while(c.copied<c.total){c=await api('/api/copystep',{method:'POST'});$('prog').max=c.total;$('prog').value=c.copied;
+   $('progt').textContent='Copying to profile.image: '+size(c.copied)+' / '+size(c.total);}
+  // The Mac's hidden ._ companion of the old profile.image follows it (not critical, so failures are ignored)
+  if(have.has('._profile.image'))try{await api(backup?'/api/mv?from=%2F._profile.image&to='+encodeURIComponent(join('/','._'+backup.slice(1)))
+   :'/api/rm?path=%2F._profile.image',{method:'POST'})}catch(e){}
+  await load();msg('Copied '+src+' to profile.image. ESProFile will boot from it when ESP32 MODE is back to NORMAL.');
+ }catch(e){await load();msg(e.message,1);}
+ $('prog').hidden=true;$('progt').textContent='';}
 $('all').onchange=e=>{document.querySelectorAll('input.sel').forEach(c=>c.checked=e.target.checked);selChanged();};
 function go(p){cwd=p;load();}
 async function act(url){try{await api(url,{method:'POST'});load();}catch(e){msg(e.message,1);}}

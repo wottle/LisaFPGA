@@ -116,6 +116,34 @@ reliably. So back it up in 512 KB pieces, falling back to 4 KB pieces and then `
 almost certainly what "hung" ESProFile in October: its reads were aborting, not the chip failing. Backup:
 `tools/esp32_wifi_test/backup/esprofile_flash_backup.bin`, two passes identical, SHA-256 `16f890c0...`. Each esptool call
 resets ESProFile, so its LED flashes red during a backup; that is expected.
+**WIFI HDD build: WNS +0.326 / WHS +0.049, JTAG-tested.** FDD/HDD switching, the card label and mount-next hiding
+all behave. **ESP32 MODE lock (2026-10-12): WNS +0.405 / WHS +0.077, JTAG-tested and working; NOT yet in flash.** The row
+reads NORMAL / WIFI FDD / WIFI HDD with the Lisa off and DISABLED with it on (`lisa_on` = `~blank_video_sync`, the
+Lisa's ON signal already synchronised for video blanking -- no new CDC). Switching the Lisa on in WIFI HDD drops to
+NORMAL; WIFI FDD is kept so the Serial A modem works from the running Lisa. The Lisa's self-test outlasts ESProFile's
+~3 s restart: it boots from the hard disk fine.
+**Data safety across mode switches.** The servers check MODE only between requests, so single operations are atomic;
+the risk was MULTI-request operations. Uploads (OPEN mode 3) and copies are now STAGED in `/.LISANET/UPLOAD.PRT` /
+`COPY.PRT` and moved into place in one request (the completing CLOSE, or the last COPY_STEP), which also does the
+replace-with-backup for Copy to profile.image. Verified over USB: an upload killed halfway left the target byte-identical
+and the temp file was discarded by the next request. Verified on hardware: Lisa switched on mid-copy booted the OLD
+profile.image intact.
+**ESProFile stuck-in-emulator bug, found and fixed (2026-10-12):** after that test, selecting WIFI HDD again did
+nothing -- COM3 answered "semaphore timeout" (USB dead = emulator running with interrupts off). Three emulator transfer
+loops (`receiveCommand`, `receiveMultiData`, `sendMultiData`) exit only on CMD low or PRES low, with no timeout and no
+MODE watch, so a bus the Lisa abandoned at power-off can hold the drive there for good. Fix: those loops also exit when
+MODE goes high (tested in the SAME GPIO_IN1 read as PRES, so no extra cost at 75 MHz), the emulator then skips the
+half-received command, and the switch no longer prints to USB before restarting. Safe because the menu lock means MODE
+can only rise while the Lisa is off. Which loop actually caught it was not proven (nothing can be observed once stuck);
+the repeat of the scenario is the real test. ESProFile's LED is now AMBER in server mode, GREEN as the hard disk.
+**Copy to profile.image** (ESProFile card, `.image`/`.img`): COPY_START / COPY_STEP on-card copy, 1 MB per step, with
+the dialog's rename (default `profile-backup-N.image`) or discard of the old file done by the server at the commit.
+**XIAO setup network:** `wifisetup.cpp`, WPA2 `LisaNet-Setup` / `lisanet-setup`, captive DNS; comes up with no saved
+network, after 60 s without the saved one (then rescans every 3 min), or on AT+WSETUP; the B button held 5 s wipes the
+network and web password. Phones' captive-portal windows never show HTTP Basic auth prompts (blank white page), so the
+setup page uses its own login form + session token. Tested on a phone: it pops up, logs in, joins. WiFi startup must
+precede `server.begin()` (crash loop `xQueueSemaphoreTake ... pxQueue` otherwise). Windows' `netsh wlan show networks`
+is a stale cache -- check for the setup network from a phone.
 **"ESFloppy's button doesn't mount a disk" -- SOLVED (2026-10-11), not a button or FPGA problem.** With the OLED dead,
 a "virtual OLED" build of ESFloppy (local `lisanet` branch, uncommitted: `lisanetLogUi()` in `ui.cpp` plus
 `filePickerDescribe()` in `uiFilePicker.cpp`) logs button presses, screen changes, the file picker highlight, error

@@ -172,21 +172,54 @@ int write(uint64_t off, const uint8_t *buf, size_t n) {
     return call(0x22, a, 9, buf, n, 3000);
 }
 
-int close() { uint8_t h = HANDLE; return call(0x23, &h, 1, nullptr, 0, 5000); }
+int close(bool abandon) {
+    uint8_t a[2] = {HANDLE, 1};
+    return call(0x23, a, abandon ? 2 : 1, nullptr, 0, 5000);   // a completing CLOSE also moves an upload into place
+}
 int remove(const String &path) { return pathCall(0x30, path, 5000); }
 
-int rename(const String &from, const String &to) {
-    // old path, a NUL, new path. (Arduino String silently drops an appended '\0', so build the bytes directly.)
+// Requests whose payload is two paths: the first, a NUL, the second. (Arduino String silently drops an appended
+// '\0', so build the bytes directly.)
+static int twoPathCall(uint8_t cmd, const String &from, const String &to, uint32_t timeoutMs) {
     uint8_t a[512];
     size_t nf = from.length(), nt = to.length();
     if (nf + 1 + nt > sizeof a) return BAD_REQUEST;
     memcpy(a, from.c_str(), nf);
     a[nf] = 0;
     memcpy(a + nf + 1, to.c_str(), nt);
-    return call(0x31, a, nf + 1 + nt, nullptr, 0, 5000);
+    return call(cmd, a, nf + 1 + nt, nullptr, 0, timeoutMs);
 }
 
+int rename(const String &from, const String &to) { return twoPathCall(0x31, from, to, 5000); }
+
 int mkdir(const String &path) { return pathCall(0x32, path, 5000); }
+
+int copyStart(const String &from, const String &to, uint64_t &total) {
+    int s = twoPathCall(0x33, from, to, 30000);                      // reserving the destination scans the FAT
+    if (s == OK && respLen() >= 8) total = get64(resp());
+    return s;
+}
+
+int copyReplace(const String &from, const String &to, const String &backup, uint64_t &total) {
+    // source, NUL, target, NUL, backup: the third field lets the target exist (see the protocol doc)
+    uint8_t a[768];
+    size_t nf = from.length(), nt = to.length(), nb = backup.length();
+    if (nf + nt + nb + 2 > sizeof a) return BAD_REQUEST;
+    memcpy(a, from.c_str(), nf);
+    a[nf] = 0;
+    memcpy(a + nf + 1, to.c_str(), nt);
+    a[nf + 1 + nt] = 0;
+    memcpy(a + nf + nt + 2, backup.c_str(), nb);
+    int s = call(0x33, a, nf + nt + nb + 2, nullptr, 0, 30000);
+    if (s == OK && respLen() >= 8) total = get64(resp());
+    return s;
+}
+
+int copyStep(uint64_t &copied, uint64_t &total) {
+    int s = call(0x34, nullptr, 0, nullptr, 0, 10000);
+    if (s == OK && respLen() >= 16) { copied = get64(resp()); total = get64(resp() + 8); }
+    return s;
+}
 int mountNextSet(const String &path) { return pathCall(0x40, path, 5000); }
 
 int mountNextGet(String &path) {

@@ -205,6 +205,10 @@ module HDMI_Interface #(
         blank_video_int <= blank_video;
         blank_video_sync <= blank_video_int;
     end
+    // The menu also uses it: ESP32 MODE can only be changed while the Lisa is off (see the ESP32 MODE row below)
+    logic lisa_on;
+    assign lisa_on = ~blank_video_sync;
+    logic lisa_on_prev = 1'b0;   // lisa_on at the previous frame tick, for spotting the Lisa being switched on
 
     // Now generate the audio clock by dividing the pixel clock down to 48KHz using a counter
     // We can't use an MMCM because they can only go down to 6MHz or so
@@ -680,6 +684,15 @@ module HDMI_Interface #(
             // having its reload immediately decremented in the same frame.
             if (save_disp_cnt != 6'd0) save_disp_cnt <= save_disp_cnt - 1'b1;
 
+            // Switching the Lisa on while WIFI HDD is active returns ESP32 MODE to NORMAL, so ESProFile is back to
+            // being the hard disk before the Lisa looks for it (it restarts in ~3 s; the boot ROM's self-test takes
+            // longer). WIFI FDD is left alone so the WiFi modem on Serial A stays usable from the running Lisa.
+            lisa_on_prev <= lisa_on;
+            if (lisa_on && !lisa_on_prev && esp_target_hdd) begin
+                esp_wifi_mode  <= 1'b0;
+                esp_target_hdd <= 1'b0;
+            end
+
             // Hold off initialising until the flash read has finished, so a saved block wins over the
             // compile-time defaults rather than being briefly overwritten by them. If the block is
             // missing or its checksum failed, settings_valid is low and we fall back to defaults --
@@ -777,10 +790,11 @@ module HDMI_Interface #(
                                 else                        speed_idx <= speed_idx + 1'b1;
                             end
                             3'd4: contrast_override_menu <= ~contrast_override_menu;   // MAX CONTRAST
-                            // ESP32 MODE: FLOPPY -> WIFI FDD -> WIFI HDD -> FLOPPY. Takes effect at once (the chosen
+                            // ESP32 MODE: NORMAL -> WIFI FDD -> WIFI HDD -> NORMAL. Only while the Lisa is off.
+                            // Takes effect at once (the chosen
                             // ESP32 restarts into its SD-server personality); it is only remembered across a power
                             // cycle if SAVE SETTINGS is used.
-                            3'd5: begin
+                            3'd5: if (!lisa_on) begin                                  // DISABLED while it's on
                                 if (!esp_wifi_mode)       esp_wifi_mode  <= 1'b1;
                                 else if (!esp_target_hdd) esp_target_hdd <= 1'b1;
                                 else begin                esp_wifi_mode  <= 1'b0; esp_target_hdd <= 1'b0; end
@@ -1161,9 +1175,10 @@ module HDMI_Interface #(
             12: menu_value = "   10MHZ";
             13: menu_value = "   15MHZ";
             14: menu_value = "18.75MHZ";
-            15: menu_value = "  FLOPPY"; // ESP32 MODE: ESFloppy floppy emulator (default)
+            15: menu_value = "  NORMAL"; // ESP32 MODE: both ESP32s emulate their drives (default)
             16: menu_value = "WIFI FDD"; // ESP32 MODE: WiFi board on Serial A, managing ESFloppy's SD card
             17: menu_value = "WIFI HDD"; // ESP32 MODE: WiFi board on Serial A, managing ESProFile's SD card
+            18: menu_value = "DISABLED"; // ESP32 MODE while the Lisa is on: it can only be changed with the Lisa off
             default: menu_value = "        ";
         endcase
     endfunction
@@ -1184,7 +1199,7 @@ module HDMI_Interface #(
             for (int j = 0; j < 16; j = j + 1) label_rom[i*16 + j] = ascii_glyph(label_tmp[8*(15-j) +: 8]);
         end
         // Value strings: blank, 1080P30, 1024X768, ON, OFF, 1080P60, SAVED, DEFAULT, SAVING, NO ROOM, and the
-        // five CPU SPEED values, FLOPPY, WIFI FDD and WIFI HDD.
+        // five CPU SPEED values, NORMAL, WIFI FDD, WIFI HDD and DISABLED.
         // Fill all 32 slots (menu_value's default is blank) so no index can read an uninitialised entry.
         for (int i = 0; i < 32; i = i + 1) begin
             value_tmp = menu_value(i);
@@ -1278,7 +1293,7 @@ module HDMI_Interface #(
             3'd2: m_vid = (v_limit == 11'd0) ? 4'd9 : 4'd0;       // ADJUST VERT: NO ROOM where it can't move
             3'd3: m_vid = speed_user_set ? (4'd11 + 4'(speed_idx)) : 4'd10; // CPU SPEED
             3'd4: m_vid = contrast_eff  ? 4'd3 : 4'd4;
-            3'd5: m_vid = esp_wifi_mode ? (esp_target_hdd ? 5'd17 : 5'd16) : 5'd15; // ESP32 MODE
+            3'd5: m_vid = lisa_on ? 5'd18 : esp_wifi_mode ? (esp_target_hdd ? 5'd17 : 5'd16) : 5'd15; // ESP32 MODE
             // SAVING wins over both, so a repeat save on an already-saved board still shows something happening
             3'd6: m_vid = save_active ? 4'd8 : (settings_valid_q ? 4'd6 : 4'd7);
             default: m_vid = 4'd0;                        // EXIT has no value

@@ -13,6 +13,7 @@
 //   AT+WIP                   IP address, gateway, DNS and MAC
 //   AT+WLEAVE                disconnect (the network stays remembered)
 //   AT+WFORGET               disconnect and forget the remembered network
+//   AT+WSETUP                bring up the setup network ("LisaNet-Setup") now, keeping what is saved
 //   AT+WEBPASS="password"    set the web page's password (user name "lisa"); the page stays locked until one is set
 //   AT+WEB                   the web page's address and whether a password is set
 //   AT+SDINFO                check the link to ESFloppy: its firmware, card size and free space
@@ -23,6 +24,7 @@
 #include "atmodem.h"
 #include "config.h"
 #include "sdlink.h"
+#include "wifisetup.h"
 #include <WiFi.h>
 #include <Preferences.h>
 
@@ -141,6 +143,7 @@ static void cmdJoin(const char *args) {
     if (joinNetwork(ssid, pass)) {
         nvs.putString("ssid", ssid);
         nvs.putString("pass", pass);
+        wifisetup::joined();
         outf("CONNECTED %s\r\n", WiFi.localIP().toString().c_str());
         ok();
     } else {
@@ -203,7 +206,7 @@ static void cmdSdInfo() {
 static void cmdHelp() {
     outln("AT  ATI  ATE0  ATE1  AT+HELP");
     outln("AT+WSCAN  AT+WJOIN=\"ssid\",\"password\"  AT+WJOIN");
-    outln("AT+WSTATUS  AT+WIP  AT+WLEAVE  AT+WFORGET");
+    outln("AT+WSTATUS  AT+WIP  AT+WLEAVE  AT+WFORGET  AT+WSETUP");
     outln("AT+WEBPASS=\"password\"  AT+WEB  AT+SDINFO");
     ok();
 }
@@ -235,6 +238,7 @@ static void runCommand(char *cmd) {
     else if (strcmp(c, "+WFORGET") == 0)       { WiFi.disconnect(); nvs.remove("ssid"); nvs.remove("pass"); ok(); }
     else if (strncmp(c, "+WEBPASS", 8) == 0)   cmdWebPass(c + 8);
     else if (strcmp(c, "+WEB") == 0)           cmdWeb();
+    else if (strcmp(c, "+WSETUP") == 0)        { wifisetup::startAP("AT+WSETUP"); outln("SETUP NETWORK " SETUP_AP_SSID " IS UP (PASSWORD " SETUP_AP_PASS ")"); ok(); }
     else if (strcmp(c, "+SDINFO") == 0)        cmdSdInfo();
     else                                       error("unknown command, try AT+HELP");
 }
@@ -277,13 +281,6 @@ void begin(HardwareSerial &port) {
     outln("");
     outln("LISANET WIFI BOARD " LISANET_WIFI_VERSION " READY. TYPE AT+HELP");
 
-    // Rejoin the remembered network in the background; AT+WSTATUS shows how it went
-    String ssid = nvs.getString("ssid", "");
-    if (ssid.length()) {
-        String pass = nvs.getString("pass", "");
-        WiFi.begin(ssid.c_str(), pass.length() ? pass.c_str() : nullptr);
-        outf("REJOINING %s (AT+WSTATUS TO CHECK)\r\n", ssid.c_str());
-    }
 }
 
 void poll() {
