@@ -122,7 +122,7 @@ reads NORMAL / WIFI FDD / WIFI HDD with the Lisa off and DISABLED with it on (`l
 Lisa's ON signal already synchronised for video blanking -- no new CDC). Switching the Lisa on in WIFI HDD drops to
 NORMAL; WIFI FDD is kept so the Serial A modem works from the running Lisa. The Lisa's self-test outlasts ESProFile's
 ~3 s restart: it boots from the hard disk fine.
-**Menu: ESP32 MODE first, and hidden without a WiFi board (2026-10-12, building).** Row order is now ESP32 MODE,
+**Menu: ESP32 MODE first, and hidden without a WiFi board -- built (WNS +0.081 / WHS +0.085; worst path is now the menu draw, video_mode -> menu_pixel, 9 levels at 1080p60: pipeline m_item first if the menu grows), hardware-tested 2026-10-13 (row first; vanishes ~2 s after unplugging the XIAO, returns as NORMAL), FLASHED and cold-booted with saved settings intact.** Row order is now ESP32 MODE,
 RESOLUTION, ADJUST HORIZ, ADJUST VERT, CPU SPEED, MAX CONTRAST, SAVE SETTINGS, EXIT; `m_item = m_row + (present?0:1)`
 maps display rows to items, so with no board the box is 7 rows (`menu_h` 112). Presence: J21 GPIO5 (the XIAO's link
 TX) is now PULLED DOWN, and a powered XIAO holds it high (UART idle), so "seen high within ~2 s" = board present. Both
