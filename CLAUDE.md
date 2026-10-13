@@ -143,7 +143,7 @@ MODE watch, so a bus the Lisa abandoned at power-off can hold the drive there fo
 MODE goes high (tested in the SAME GPIO_IN1 read as PRES, so no extra cost at 75 MHz), the emulator then skips the
 half-received command, and the switch no longer prints to USB before restarting. Safe because the menu lock means MODE
 can only rise while the Lisa is off. Which loop actually caught it was not proven (nothing can be observed once stuck);
-the repeat of the scenario is the real test. ESProFile's LED is now AMBER in server mode, GREEN as the hard disk.
+**CONFIRMED on hardware 2026-10-13: the repeat of the scenario (copy, Lisa on mid-copy, power off, WIFI HDD again) went to amber with no reflash.** ESProFile's LED is now AMBER in server mode, GREEN as the hard disk.
 **Copy to profile.image** (ESProFile card, `.image`/`.img`): COPY_START / COPY_STEP on-card copy, 1 MB per step, with
 the dialog's rename (default `profile-backup-N.image`) or discard of the old file done by the server at the commit.
 **XIAO setup network:** `wifisetup.cpp`, WPA2 `LisaNet-Setup` / `lisanet-setup`, captive DNS; comes up with no saved
