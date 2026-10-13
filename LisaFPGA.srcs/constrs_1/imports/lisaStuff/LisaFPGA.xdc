@@ -589,10 +589,13 @@ set_property -dict {PACKAGE_PIN E3 IOSTANDARD LVCMOS33} [get_ports {GPIO[4]}]
 set_property -dict {PACKAGE_PIN D4 IOSTANDARD LVCMOS33} [get_ports {GPIO[5]}]
 ## Per-pin pulls (they used to be one RTL PULLDOWN on the whole bus). [0]/[1] are jumper-to-3V3 inputs, so they keep
 ## their pull-downs. [2]/[4] are WiFi-board outputs in ESP32 MODE = WIFI and tri-stated otherwise; a pull-down keeps them
-## where they always were. [3]/[5] are inputs FROM the WiFi board carrying serial data, so they idle at mark (high) when
-## no board is attached -- a pull-down there would look like a permanent break to the SCC and to ESFloppy.
-set_property PULLTYPE PULLDOWN [get_ports {GPIO[0] GPIO[1] GPIO[2] GPIO[4]}]
-set_property PULLTYPE PULLUP   [get_ports {GPIO[3] GPIO[5]}]
+## where they always were. [3] is an input FROM the WiFi board carrying serial data into the SCC, so it is pulled up to
+## idle at mark when no board drives it. [5] is the WiFi board's link TX and is deliberately pulled DOWN: a powered,
+## wired board holds it high (serial idle), so "GPIO5 seen high" is how HDMI_Interface knows a board is attached and
+## shows the ESP32 MODE row. With no board, ESP32 MODE is forced to NORMAL, so the resulting permanent "break" on this
+## line never reaches an SD server.
+set_property PULLTYPE PULLDOWN [get_ports {GPIO[0] GPIO[1] GPIO[2] GPIO[4] GPIO[5]}]
+set_property PULLTYPE PULLUP   [get_ports {GPIO[3]}]
 
 ## Comms With External SCC
 set_property -dict {PACKAGE_PIN B2 IOSTANDARD LVCMOS33} [get_ports SCC_C4M]

@@ -122,6 +122,14 @@ reads NORMAL / WIFI FDD / WIFI HDD with the Lisa off and DISABLED with it on (`l
 Lisa's ON signal already synchronised for video blanking -- no new CDC). Switching the Lisa on in WIFI HDD drops to
 NORMAL; WIFI FDD is kept so the Serial A modem works from the running Lisa. The Lisa's self-test outlasts ESProFile's
 ~3 s restart: it boots from the hard disk fine.
+**Menu: ESP32 MODE first, and hidden without a WiFi board (2026-10-12, building).** Row order is now ESP32 MODE,
+RESOLUTION, ADJUST HORIZ, ADJUST VERT, CPU SPEED, MAX CONTRAST, SAVE SETTINGS, EXIT; `m_item = m_row + (present?0:1)`
+maps display rows to items, so with no board the box is 7 rows (`menu_h` 112). Presence: J21 GPIO5 (the XIAO's link
+TX) is now PULLED DOWN, and a powered XIAO holds it high (UART idle), so "seen high within ~2 s" = board present. Both
+MODE lines are gated on presence in top.sv; after a 3 s power-up grace (so a saved WIFI mode waits for the XIAO), an
+absent board drops the mode to NORMAL, and it stays NORMAL if the board returns. **Patch-script lesson:** a Perl helper
+taking the replacement as an ordinary string interpolates `$1` BEFORE the match, silently deleting the anchored lines
+-- caught by xvlog. Use an inline `s~~$1~` or a placeholder substituted after the match.
 **Data safety across mode switches.** The servers check MODE only between requests, so single operations are atomic;
 the risk was MULTI-request operations. Uploads (OPEN mode 3) and copies are now STAGED in `/.LISANET/UPLOAD.PRT` /
 `COPY.PRT` and moved into place in one request (the completing CLOSE, or the last COPY_STEP), which also does the

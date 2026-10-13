@@ -49,6 +49,10 @@ module HDMI_Interface #(
     // both.
     output logic        esp_wifi_mode = 1'b0,
     output logic        esp_target_hdd = 1'b0,
+    // WiFi board presence: J21 GPIO5, the board's serial TX into the FPGA, which idles HIGH whenever a board is
+    // powered and wired, against an XDC pull-down that holds it LOW when nothing is there. No board, no ESP32 MODE row.
+    input  logic        wifi_board_line,
+    output logic        wifi_board_present,
 
     // ESFloppy control buttons, active low. Only read when ALIGNMENT_TUNING_MODE is set; ignored otherwise.
     input logic btn_left,
@@ -606,6 +610,30 @@ module HDMI_Interface #(
     end
 
     logic prev_cy_zero, frame_tick;
+
+    // WiFi board presence (see the port). Sampled once a frame: a serial line idles high and is high most of the time
+    // even when busy, so seeing it high at all within ~2 s means a board is there. wifi_grace_done marks the end of a
+    // power-up grace period: until then an unseen board does not cancel a saved WIFI mode, as the XIAO may still be
+    // starting.
+    (* ASYNC_REG = "TRUE" *) logic wifi_line_int, wifi_line_sync;
+    logic [7:0] wifi_seen_cnt = 8'd0;    // frames left before an unseen board counts as gone
+    logic [7:0] wifi_grace_cnt = 8'd0;
+    logic wifi_grace_done = 1'b0;
+    always_ff @(posedge clk_pixel) begin
+        wifi_line_int  <= wifi_board_line;
+        wifi_line_sync <= wifi_line_int;
+        if (frame_tick) begin
+            if (wifi_line_sync)            wifi_seen_cnt <= 8'd120;   // ~2 s at 60 Hz, ~4 s at 30 Hz
+            else if (wifi_seen_cnt != 8'd0) wifi_seen_cnt <= wifi_seen_cnt - 1'b1;
+            if (!wifi_grace_done) begin
+                wifi_grace_cnt <= wifi_grace_cnt + 1'b1;
+                if (wifi_grace_cnt == 8'd180) wifi_grace_done <= 1'b1;   // ~3 s at 60 Hz
+            end
+        end
+    end
+    assign wifi_board_present = (wifi_seen_cnt != 8'd0);
+    logic [2:0] menu_first;              // the first menu row: ESP32 MODE, or RESOLUTION when it is hidden
+    assign menu_first = wifi_board_present ? 3'd0 : 3'd1;
     // Feedback for a repeat save. settings_valid_q is sticky -- it means "a valid block exists in flash" --
     // so once the first save lands the row reads SAVED forever and a second save produces no visible change,
     // even though it really did write. This counter forces the row to show SAVING for a minimum number of
@@ -688,6 +716,13 @@ module HDMI_Interface #(
             // being the hard disk before the Lisa looks for it (it restarts in ~3 s; the boot ROM's self-test takes
             // longer). WIFI FDD is left alone so the WiFi modem on Serial A stays usable from the running Lisa.
             lisa_on_prev <= lisa_on;
+            // No WiFi board (after the power-up grace): back to NORMAL, and it stays there if the board returns, so
+            // plugging one in can never switch an ESP32 under a running Lisa. Not saved unless SAVE SETTINGS is used.
+            if (wifi_grace_done && !wifi_board_present) begin
+                esp_wifi_mode  <= 1'b0;
+                esp_target_hdd <= 1'b0;
+                if (menu_sel == 3'd0) menu_sel <= 3'd1;
+            end
             if (lisa_on && !lisa_on_prev && esp_target_hdd) begin
                 esp_wifi_mode  <= 1'b0;
                 esp_target_hdd <= 1'b0;
@@ -747,7 +782,7 @@ module HDMI_Interface #(
                                 menu_active   <= 1'b1;
                             end else begin
                                 menu_active <= ~menu_active;
-                                menu_sel    <= 3'd0;
+                                menu_sel    <= menu_first;
                             end
                             summon_long_fired <= 1'b1; // Wait for a release before this can fire again
                         end else begin
@@ -765,9 +800,10 @@ module HDMI_Interface #(
                     if (menu_active) begin
                         // Activate the highlighted item
                         case (menu_sel)
+                            // ESP32 MODE is row 0, the one people change often -- see 3'd0 below the others.
                             // RESOLUTION: cycle 1080p30 -> 1080p60 -> 1024x768 -> back. Mode 2 is skipped
                             // when OUTPUT_1024X768 is clear, since that build has no 1024x768 clock.
-                            3'd0: begin
+                            3'd1: begin
                                 mode_user_set <= 1'b1;
                                 if (video_mode == 2'd0)      video_mode <= 2'd1;
                                 else if (video_mode == 2'd1) video_mode <= OUTPUT_1024X768 ? 2'd2 : 2'd0;
@@ -776,25 +812,25 @@ module HDMI_Interface #(
                             // ADJUST HORIZ / ADJUST VERT: close the menu and drop straight into moving the
                             // image on that axis. VERT does nothing where the image already fills the frame
                             // height (1080p with the H ROM), and its row says NO ROOM.
-                            3'd1: begin
+                            3'd2: begin
                                 axis_y <= 1'b0; tuning_active <= 1'b1; menu_active <= 1'b0;
                             end
-                            3'd2: if (v_limit != 11'd0) begin
+                            3'd3: if (v_limit != 11'd0) begin
                                 axis_y <= 1'b1; tuning_active <= 1'b1; menu_active <= 1'b0;
                             end
                             // CPU SPEED: SWITCHES -> 5 -> 10 -> 15 -> 18.75MHz -> back to SWITCHES. Takes
                             // effect at once, exactly like flipping the switches on a running machine.
-                            3'd3: begin
+                            3'd4: begin
                                 if (!speed_user_set)        begin speed_user_set <= 1'b1; speed_idx <= 2'd0; end
                                 else if (speed_idx == 2'd3) speed_user_set <= 1'b0;
                                 else                        speed_idx <= speed_idx + 1'b1;
                             end
-                            3'd4: contrast_override_menu <= ~contrast_override_menu;   // MAX CONTRAST
+                            3'd5: contrast_override_menu <= ~contrast_override_menu;   // MAX CONTRAST
                             // ESP32 MODE: NORMAL -> WIFI FDD -> WIFI HDD -> NORMAL. Only while the Lisa is off.
                             // Takes effect at once (the chosen
                             // ESP32 restarts into its SD-server personality); it is only remembered across a power
                             // cycle if SAVE SETTINGS is used.
-                            3'd5: if (!lisa_on) begin                                  // DISABLED while it's on
+                            3'd0: if (!lisa_on) begin                                  // DISABLED while it's on
                                 if (!esp_wifi_mode)       esp_wifi_mode  <= 1'b1;
                                 else if (!esp_target_hdd) esp_target_hdd <= 1'b1;
                                 else begin                esp_wifi_mode  <= 1'b0; esp_target_hdd <= 1'b0; end
@@ -816,9 +852,9 @@ module HDMI_Interface #(
                     // Suppressed while the LEFT+RIGHT summon chord is down, so starting or releasing that
                     // hold doesn't also nudge the highlight.
                     if (!summon_pressed && btn_sync[2] == 1'b0 && prev_left == 1'b1) begin
-                        menu_sel <= (menu_sel == 3'd0) ? 3'd7 : menu_sel - 1'b1;
+                        menu_sel <= (menu_sel == menu_first) ? 3'd7 : menu_sel - 1'b1;
                     end else if (!summon_pressed && btn_sync[0] == 1'b0 && prev_right == 1'b1) begin
-                        menu_sel <= (menu_sel == 3'd7) ? 3'd0 : menu_sel + 1'b1;
+                        menu_sel <= (menu_sel == 3'd7) ? menu_first : menu_sel + 1'b1;
                     end
                 end else if (tuning_active && !summon_pressed) begin
                     // Key repeat: count frames held (one direction at a time), move on the first frame and
@@ -1149,12 +1185,12 @@ module HDMI_Interface #(
     // Menu rows: a 16-character label followed by an 8-character value field
     function automatic logic [127:0] menu_label(input int i);
         case (i)
-            0: menu_label = "RESOLUTION      ";
-            1: menu_label = "ADJUST HORIZ    ";
-            2: menu_label = "ADJUST VERT     ";
-            3: menu_label = "CPU SPEED       ";
-            4: menu_label = "MAX CONTRAST    ";
-            5: menu_label = "ESP32 MODE      ";
+            0: menu_label = "ESP32 MODE      ";   // hidden when no WiFi board is attached
+            1: menu_label = "RESOLUTION      ";
+            2: menu_label = "ADJUST HORIZ    ";
+            3: menu_label = "ADJUST VERT     ";
+            4: menu_label = "CPU SPEED       ";
+            5: menu_label = "MAX CONTRAST    ";
             6: menu_label = "SAVE SETTINGS   ";
             default: menu_label = "EXIT            ";
         endcase
@@ -1257,7 +1293,8 @@ module HDMI_Interface #(
 
     // --- Menu: 24 chars x 8 rows at 2x scale => 384x128, centred for whichever mode is live ---
     localparam int MENU_W = 384;
-    localparam int MENU_H = 128; // 8 rows at 16px
+    logic [7:0] menu_h;                // 8 rows at 16px, or 7 when the ESP32 MODE row is hidden
+    assign menu_h = wifi_board_present ? 8'd128 : 8'd112;
     logic [11:0] menu_x;
     logic [10:0] menu_y;
     assign menu_x = in_1024_mode ? 12'd320 : 12'd768;
@@ -1282,18 +1319,20 @@ module HDMI_Interface #(
     assign mdx = cx5 - menu_x;
     assign mdy = cy5 - menu_y;
     assign m_row = mdy[6:4]; // 16px per row at 2x scale
+    logic [2:0] m_item;                // the menu item on this row: ESP32 MODE's row is skipped when it is hidden
+    assign m_item = m_row + (wifi_board_present ? 3'd0 : 3'd1);
     assign m_col = mdx[8:4]; // 16px per character, 0..23
     always_comb begin
         // Which value string this row shows, from the live state of whatever that row controls
-        case (m_row)
+        case (m_item)
             // What the second mode actually IS depends on the build, so name it accordingly rather than
             // assuming 1024x768: a stock build's second position is 1080p60
-            3'd0: m_vid = (video_mode == 2'd0) ? 4'd1 : (video_mode == 2'd1) ? 4'd5 : 4'd2; // 1080P30 / 1080P60 / 1024X768
-            3'd1: m_vid = 4'd0;                                   // ADJUST HORIZ: no value
-            3'd2: m_vid = (v_limit == 11'd0) ? 4'd9 : 4'd0;       // ADJUST VERT: NO ROOM where it can't move
-            3'd3: m_vid = speed_user_set ? (4'd11 + 4'(speed_idx)) : 4'd10; // CPU SPEED
-            3'd4: m_vid = contrast_eff  ? 4'd3 : 4'd4;
-            3'd5: m_vid = lisa_on ? 5'd18 : esp_wifi_mode ? (esp_target_hdd ? 5'd17 : 5'd16) : 5'd15; // ESP32 MODE
+            3'd1: m_vid = (video_mode == 2'd0) ? 4'd1 : (video_mode == 2'd1) ? 4'd5 : 4'd2; // 1080P30 / 1080P60 / 1024X768
+            3'd2: m_vid = 4'd0;                                   // ADJUST HORIZ: no value
+            3'd3: m_vid = (v_limit == 11'd0) ? 4'd9 : 4'd0;       // ADJUST VERT: NO ROOM where it can't move
+            3'd4: m_vid = speed_user_set ? (4'd11 + 4'(speed_idx)) : 4'd10; // CPU SPEED
+            3'd5: m_vid = contrast_eff  ? 4'd3 : 4'd4;
+            3'd0: m_vid = lisa_on ? 5'd18 : esp_wifi_mode ? (esp_target_hdd ? 5'd17 : 5'd16) : 5'd15; // ESP32 MODE
             // SAVING wins over both, so a repeat save on an already-saved board still shows something happening
             3'd6: m_vid = save_active ? 4'd8 : (settings_valid_q ? 4'd6 : 4'd7);
             default: m_vid = 4'd0;                        // EXIT has no value
@@ -1307,8 +1346,8 @@ module HDMI_Interface #(
         hex_idx = (m_col[2:0] >= 3'd2) ? (3'd7 - m_col[2:0]) : 3'd0;
         hex_nib = jedec_id[hex_idx*4 +: 4];
         if (m_col < 5'd16) begin
-            m_glyph = label_rom[{m_row, m_col[3:0]}];
-        end else if (m_row == 3'd6 && !settings_valid_q && !save_active) begin
+            m_glyph = label_rom[{m_item, m_col[3:0]}];
+        end else if (m_item == 3'd6 && !settings_valid_q && !save_active) begin
             if (m_col[2:0] < 3'd2) m_glyph = 6'd10;                       // leading spaces
             else if (hex_nib < 4'd10) m_glyph = 6'(hex_nib);              // 0-9
             else m_glyph = 6'd12 + 6'(hex_nib) - 6'd10;                   // A-F
@@ -1320,8 +1359,8 @@ module HDMI_Interface #(
         m_vid_q <= m_vid;
         menu_on <= ALIGNMENT_TUNING_MODE && menu_active &&
                    (cx5 >= menu_x) && (cx5 < menu_x + MENU_W) &&
-                   (cy5 >= menu_y) && (cy5 < menu_y + MENU_H);
-        menu_highlight <= (m_row == menu_sel);
+                   (cy5 >= menu_y) && (cy5 < menu_y + menu_h);
+        menu_highlight <= (m_item == menu_sel);
         menu_pixel <= font_rom[{m_glyph, mdy[3:1]}][7 - mdx[3:1]];
     end
 

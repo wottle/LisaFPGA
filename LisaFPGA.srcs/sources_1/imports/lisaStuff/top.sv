@@ -728,6 +728,7 @@ module top(
     // ---------------------------------------------------------------------------------------------
     logic esp_wifi_mode_menu;   // clk_pixel domain, straight from the menu
     logic esp_target_hdd_menu;  // clk_pixel domain: 0 = ESFloppy, 1 = ESProFile; only ever 1 in WIFI
+    logic wifi_present_menu;    // clk_pixel domain: a WiFi board is on J21 (its idle-high TX seen on GPIO5)
     // Only the MODE pins and the link mux need the target, so it is synchronised into sysclk alone. The two flags
     // cross independently; a mode change can show a mixed state for one clock, far shorter than the 300 ms an ESP32
     // waits before acting on its MODE line.
@@ -742,11 +743,11 @@ module top(
     (* ASYNC_REG = "TRUE" *) logic esp_mode_sys_int, esp_mode_sys;
     (* ASYNC_REG = "TRUE" *) logic esp_mode_dot_int, esp_mode_dot;
     always_ff @(posedge sysclk_fabric) begin
-        esp_mode_sys_int <= esp_wifi_mode_menu;
+        esp_mode_sys_int <= esp_wifi_mode_menu & wifi_present_menu;   // no board on J21: both ESP32s stay NORMAL
         esp_mode_sys     <= esp_mode_sys_int;
     end
     always_ff @(posedge DOTCK) begin
-        esp_mode_dot_int <= esp_wifi_mode_menu;
+        esp_mode_dot_int <= esp_wifi_mode_menu & wifi_present_menu;
         esp_mode_dot     <= esp_mode_dot_int;
     end
 
@@ -795,6 +796,8 @@ module top(
         .cpu_speed(cpu_speed_menu),
         .esp_wifi_mode(esp_wifi_mode_menu),
         .esp_target_hdd(esp_target_hdd_menu),
+        .wifi_board_line(GPIO[5]),
+        .wifi_board_present(wifi_present_menu),
         .jedec_id(settings_dbg_word),
         .btn_left(LEFT_ESFLOPPY),
         .btn_ok(OK_ESFLOPPY),
