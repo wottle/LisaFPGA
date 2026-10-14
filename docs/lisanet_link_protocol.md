@@ -75,3 +75,44 @@ the whole size contiguously up front (SdFat `preAllocate`), failing with NO_CONT
 fragmented. LIST pages: send `start_index` 0, then the
 returned `next_index` until it is 0xFFFF. MOUNT_NEXT stores an image in `/.LISANET/MOUNTNXT.TXT` (a dot folder, so the file picker hides it); ESFloppy
 mounts it in drive 1 (the Sony drive, or the lower Twiggy) **every** time it starts in FLOPPY mode, until cleared.
+
+## FPGA control frames
+
+The FPGA itself also listens on the WiFi board's link TX (J21 GPIO5), in every ESP32 mode, for frames addressed to it.
+It answers on J21 GPIO4, the line back to the WiFi board. Implemented in `LisaFPGA.srcs/sources_1/new/lisanet_ctrl.sv`
+(FPGA) and `firmware/lisanet_wifi/fpgactl.cpp` (WiFi board).
+
+```
+offset  size  field
+0       4     marker: C3 3C 96 69
+4       1     cmd   (requests 0x01-0x7F; the reply sets bit 7)
+5       1     seq   (echoed in the reply)
+6       1     len   payload length (requests at most 8)
+7       len   payload
+7+len   4     CRC-32 (zlib) of bytes 4 .. 6+len, little-endian
+```
+
+Same 2 Mbaud 8N1 as the SD link. The SD servers skip anything that is not their own `A5 5A` frame, so control frames pass
+them by -- **the sender must choose seq so that no byte of the frame is `A5`**. The 4-byte marker plus the CRC mean SD
+traffic, even uploaded file data, effectively never parses as a control frame. In the WiFi modes GPIO4 normally carries
+the serving ESP32's TX, so the FPGA starts a reply only after that line has been idle for 20 us; the WiFi board sends a
+control frame only while it has no SD request outstanding, so the ESP32 is silent. A frame with a bad CRC gets no reply.
+
+| Cmd | Name | Request payload | Reply payload (after status) |
+|---|---|---|---|
+| 0x01 | STATUS | — | `u8 version (1)`, 11-byte status block, `u16` XADC temperature code (degrees C = code x 503.975 / 65536 - 273.15) |
+| 0x02 | SET | `u8 reg`, `u16 value` | — |
+| 0x03 | ACTION | `u8 action`: 1 save settings, 2 press the Lisa's power button, 3 press reset (each press lasts 250 ms) | — |
+
+Status: 0 OK, 1 BAD_REQUEST, 2 LOCKED (ESP32 mode while the Lisa is on), 3 BUSY (the FPGA did not take the write within
+200 ms), 4 UNKNOWN_CMD.
+
+SET registers, applied on the next video frame with the on-screen menu's limits and locks: 1 resolution (0 1080p30,
+1 1080p60, 2 1024x768 where built), 2 H offset and 3 V offset of the live mode (clamped to its room), 4 max contrast
+(the effective setting; the jumper is folded in), 5 CPU speed (0 follow the switches, 1-4 = 5 / 10 / 15 / 18.75 MHz),
+6 ESP32 mode (0 NORMAL, 1 WIFI FDD, 2 WIFI HDD; only with the Lisa off). Like the menu, changes last until power-off
+unless saved.
+
+Status block (little-endian): 0 resolution; 1 flags (bit 0 max contrast, 1 Lisa on, 2 WiFi board present, 3 ESP32 WIFI,
+4 target HDD, 5 a saved block exists, 6 saving, 7 CPU speed chosen); 2 bits 0-1 CPU speed index, 2 1024x768 built in,
+3 resolution chosen, 4 3A ROM, 5 MAX CONTRAST jumper; 3-4 H offset, 5-6 H limit, 7-8 V offset, 9-10 V limit.

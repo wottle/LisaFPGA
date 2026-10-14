@@ -561,6 +561,17 @@ module top(
         //assign C5M = (ON) ? C5M_ungated : 1'b0;
     `endif
 
+    // Virtual presses of the power and reset buttons from the WiFi board (lisanet_ctrl, sysclk domain, active high),
+    // synchronised into COPCK_2x and combined with the real buttons below (active low at the pins).
+    logic ctrl_pwr_press, ctrl_rst_press;
+    (* ASYNC_REG = "TRUE" *) logic ctrl_pwr_int, ctrl_pwr_sync, ctrl_rst_int, ctrl_rst_sync;
+    always_ff @(posedge COPCK_2x) begin
+        ctrl_pwr_int  <= ctrl_pwr_press;
+        ctrl_pwr_sync <= ctrl_pwr_int;
+        ctrl_rst_int  <= ctrl_rst_press;
+        ctrl_rst_sync <= ctrl_rst_int;
+    end
+
     logic _RSTSW_int;
 
     // We need to be able to reset when the COP turns the Lisa on too, not just when the reset button is pressed
@@ -571,7 +582,7 @@ module top(
 
     always_ff @(posedge COPCK_2x) begin
         ON_prev <= ON;
-        _RSTSW_int <= _RSTSW & ~(ON & ~ON_prev); // Detect the rising edge of ON and use that plus the reset switch to reset the system
+        _RSTSW_int <= _RSTSW & ~ctrl_rst_sync & ~(ON & ~ON_prev); // (the WiFi board's virtual reset too) Detect the rising edge of ON and use that plus the reset switch to reset the system
     end
 
     // We also need to do some stuff with the _PWRSW signal to address a bug in the original Lisa system
@@ -582,7 +593,7 @@ module top(
     // First, synchronize the _PWRSW signal to the COPCK domain
     (* ASYNC_REG = "TRUE" *) logic _PWRSW_int, _PWRSW_sync;
     always_ff @(posedge COPCK_2x) begin
-        _PWRSW_int <= _PWRSW;
+        _PWRSW_int <= _PWRSW & ~ctrl_pwr_sync;   // the real button, or the WiFi board's virtual press
         _PWRSW_sync <= _PWRSW_int;
     end
     // Now detect the falling edge of the synchronized version of _PWRSW
@@ -764,8 +775,29 @@ module top(
     assign serve_hdd = esp_mode_sys &  esp_hdd_sys;
 
     assign GPIO[2] = esp_mode_dot ? txda_core : 1'bz;                    // Lisa Serial A -> WiFi board
-    assign GPIO[4] = serve_fdd ? ESFLOPPY_COMM_BUS[5]                    // SD server -> WiFi board
-                   : serve_hdd ? ESPROFILE_COMM_BUS[2] : 1'bz;
+    // The WiFi board's control channel into the FPGA itself (settings, ESP32 mode, power and reset): it listens on
+    // GPIO5 in every mode and replies on GPIO4 once the serving ESP32's TX has been idle a while. See lisanet_ctrl.sv.
+    logic        ctrl_tx, ctrl_tx_en;
+    logic [15:0] ctrl_web_req;
+    logic        ctrl_web_ack;
+    logic [87:0] ctrl_status;
+    lisanet_ctrl lisanet_control (
+        .clk(sysclk_fabric),
+        .rx_pin(GPIO[5]),
+        .sd_tx_pin(serve_fdd ? ESFLOPPY_COMM_BUS[5] : serve_hdd ? ESPROFILE_COMM_BUS[2] : 1'b1),
+        .tx(ctrl_tx),
+        .tx_en(ctrl_tx_en),
+        .status_in(ctrl_status),
+        .web_req(ctrl_web_req),
+        .web_ack(ctrl_web_ack),
+        .pwr_press(ctrl_pwr_press),
+        .rst_press(ctrl_rst_press)
+    );
+
+    assign GPIO[4] = ctrl_tx_en ? ctrl_tx                                 // the FPGA's own reply (lisanet_ctrl)
+                   : serve_fdd ? ESFLOPPY_COMM_BUS[5]                    // SD server -> WiFi board
+                   : serve_hdd ? ESPROFILE_COMM_BUS[2]
+                   : wifi_present_menu ? 1'b1 : 1'bz;                    // idle (mark) for a WiFi board in NORMAL
     assign GPIO[3] = 1'bz;                                               // inputs only
     assign GPIO[5] = 1'bz;
     assign GPIO[1:0] = 2'bzz;                                            // jumper inputs, never driven
@@ -798,6 +830,9 @@ module top(
         .esp_target_hdd(esp_target_hdd_menu),
         .wifi_board_line(GPIO[5]),
         .wifi_board_present(wifi_present_menu),
+        .web_req(ctrl_web_req),
+        .web_ack(ctrl_web_ack),
+        .ctrl_status(ctrl_status),
         .jedec_id(settings_dbg_word),
         .btn_left(LEFT_ESFLOPPY),
         .btn_ok(OK_ESFLOPPY),

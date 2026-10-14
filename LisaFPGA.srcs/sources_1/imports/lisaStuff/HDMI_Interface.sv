@@ -53,6 +53,14 @@ module HDMI_Interface #(
     // powered and wired, against an XDC pull-down that holds it LOW when nothing is there. No board, no ESP32 MODE row.
     input  logic        wifi_board_line,
     output logic        wifi_board_present,
+    // The WiFi board's settings writes, from lisanet_ctrl (sysclk domain): {toggle, reg[3:0], value[10:0]}, data held
+    // until web_ack follows the toggle. Applied on a frame tick with the same limits and locks as the menu. reg: 1 video
+    // mode, 2 H offset, 3 V offset (the live mode's), 4 max contrast, 5 CPU speed (0 = switches, 1-4), 6 ESP32 mode,
+    // 7 save settings.
+    input  logic [15:0] web_req,
+    output logic        web_ack,
+    // The settings and state the WiFi board reads back, 11 bytes, registered; see the packing where it is built
+    output logic [87:0] ctrl_status = 88'd0,
 
     // ESFloppy control buttons, active low. Only read when ALIGNMENT_TUNING_MODE is set; ignored otherwise.
     input logic btn_left,
@@ -632,6 +640,15 @@ module HDMI_Interface #(
         end
     end
     assign wifi_board_present = (wifi_seen_cnt != 8'd0);
+    // Settings writes from the WiFi board (see the web_req port): only the toggle is synchronised; the data bits were
+    // set at least a sysclk earlier and are held until web_ack answers, so they are stable when the toggle arrives.
+    (* ASYNC_REG = "TRUE" *) logic web_tog_int = 1'b0, web_tog_s = 1'b0;
+    logic web_tog_seen = 1'b0;
+    always_ff @(posedge clk_pixel) begin
+        web_tog_int <= web_req[15];
+        web_tog_s   <= web_tog_int;
+    end
+    assign web_ack = web_tog_seen;
     logic [2:0] menu_first;              // the first menu row: ESP32 MODE, or RESOLUTION when it is hidden
     assign menu_first = wifi_board_present ? 3'd0 : 3'd1;
     // Feedback for a repeat save. settings_valid_q is sticky -- it means "a valid block exists in flash" --
@@ -878,6 +895,34 @@ module HDMI_Interface #(
                 end else
                     hold_frames <= 7'd0;
             end
+        end
+        // A settings write from the WiFi board (lisanet_ctrl), one per frame tick. Same limits and locks as the menu:
+        // offsets are clamped to the live mode's room, 1024x768 only where the build has it, and ESP32 MODE only
+        // changes with the Lisa off and a WiFi board present.
+        if (ALIGNMENT_TUNING_MODE && frame_tick && (web_tog_s != web_tog_seen)) begin
+            web_tog_seen <= web_tog_s;
+            case (web_req[14:11])
+                4'd1: if (web_req[10:0] <= 11'd1 || (web_req[10:0] == 11'd2 && OUTPUT_1024X768)) begin
+                          mode_user_set <= 1'b1;
+                          video_mode    <= web_req[1:0];
+                      end
+                4'd2: if (in_1024_mode) h_offset_1024  <= (web_req[10:0] > h_limit) ? h_limit : web_req[10:0];
+                      else              h_offset_1080p <= (web_req[10:0] > h_limit) ? h_limit : web_req[10:0];
+                4'd3: if (in_1024_mode) v_offset_1024  <= (web_req[10:0] > v_limit) ? v_limit : web_req[10:0];
+                      else              v_offset_1080p <= (web_req[10:0] > v_limit) ? v_limit : web_req[10:0];
+                4'd4: contrast_override_menu <= web_req[0] ^ cont_override;   // asks for the effective setting
+                4'd5: if (web_req[10:0] == 11'd0) speed_user_set <= 1'b0;
+                      else if (web_req[10:0] <= 11'd4) begin
+                          speed_user_set <= 1'b1;
+                          speed_idx      <= web_req[1:0] - 1'b1;
+                      end
+                4'd6: if (!lisa_on && wifi_board_present) begin
+                          esp_wifi_mode  <= (web_req[10:0] == 11'd1) || (web_req[10:0] == 11'd2);
+                          esp_target_hdd <= (web_req[10:0] == 11'd2);
+                      end
+                4'd7: start_save();
+                default: ;
+            endcase
         end
         // If the jumper moved, re-clamp in case the new mode has less room than the stored value
         if (ALIGNMENT_TUNING_MODE && (in_1024_mode != in_1024_mode_q)) begin
@@ -1466,5 +1511,25 @@ module HDMI_Interface #(
         .cy(cy),
         .frame_width(frame_width) // Needed so the pipeline-latency compensation can wrap at the end of a line
     );
+
+    // What the WiFi board reads back (lisanet_ctrl's status block), little-endian bytes:
+    //   0      video_mode
+    //   1      flags: 0 max contrast (effective), 1 Lisa on, 2 WiFi board present, 3 ESP32 WIFI, 4 ESP32 target HDD,
+    //          5 a saved settings block exists, 6 saving, 7 CPU speed chosen in the menu (else the switches)
+    //   2      0-1 CPU speed index, 2 1024x768 built in, 3 resolution chosen in the menu (else the jumper),
+    //          4 3A ROM (CPU_ROM_SEL), 5 MAX CONTRAST jumper
+    //   3-4    H offset (the live mode's)   5-6  H limit   7-8  V offset   9-10  V limit
+    always_ff @(posedge clk_pixel) begin
+        ctrl_status <= {
+            {5'd0, v_limit},
+            {5'd0, in_1024_mode ? v_offset_1024 : v_offset_1080p},
+            {5'd0, h_limit},
+            {5'd0, in_1024_mode ? h_offset_1024 : h_offset_1080p},
+            {2'd0, cont_override, CPU_ROM_SEL, mode_user_set, OUTPUT_1024X768 ? 1'b1 : 1'b0, speed_idx},
+            {speed_user_set, save_active, settings_valid_q, esp_target_hdd, esp_wifi_mode, wifi_board_present,
+             lisa_on, contrast_eff},
+            {6'd0, video_mode}
+        };
+    end
 
 endmodule

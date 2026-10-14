@@ -23,9 +23,21 @@ dialog{background:var(--card);color:var(--fg);border:1px solid var(--line);borde
 dialog::backdrop{background:rgba(0,0,0,.35)}dialog input{font:inherit;padding:3px 6px;max-width:100%}
 progress{width:200px}.mn{font-size:11px;color:var(--acc);border:1px solid var(--acc);border-radius:4px;padding:0 4px;margin-left:6px}
 @media (max-width:600px){td.c{padding-left:6px}td.s{display:none}td.a button,td.a .btn{padding:2px 5px}}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:10px 0 4px}.tabs button{border:none;border-bottom:2px solid transparent;border-radius:0;background:none;padding:6px 12px}
+.tabs button.on{border-bottom-color:var(--acc);color:var(--acc);font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;margin:10px 0}.card h3{margin:0 0 8px;font-size:15px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0}.row label.k{min-width:110px;color:var(--mut)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}.seg button{border:none;border-radius:0;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:none}.seg button.on{background:var(--acc);color:#fff}
+select,input[type=number]{font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+input[type=number]{width:80px}.warn{color:var(--bad);font-weight:600}
 </style></head><body><main>
-<h1>LisaNet <span class="mut" id="who"></span></h1><div class="mut sp"><span id="info">Card space</span> <button id="infob" class="mini" title="Recalculate card space">&#x21bb;</button></div>
+<h1>LisaNet <span class="mut" id="who"></span></h1>
+<nav class="tabs"><button id="tabF" class="on">Files</button><button id="tabS">Settings</button></nav>
 <div id="msg"></div>
+<section id="tFiles">
+<div class="mut sp"><span id="info">Card space</span> <button id="infob" class="mini" title="Recalculate card space">&#x21bb;</button></div>
+<div class="bar" id="nosd" hidden><span class="mut">Switch the board to:</span><button data-esp="1">Manage ESFloppy's card (WIFI FDD)</button><button data-esp="2">Manage ESProFile's card (WIFI HDD)</button></div>
 <div class="bar"><span class="crumb" id="crumb"></span></div>
 <div class="bar">
 <label class="btn">Upload<input type="file" id="file" multiple hidden></label>
@@ -41,6 +53,31 @@ progress{width:200px}.mn{font-size:11px;color:var(--acc);border:1px solid var(--
 <table><thead><tr><th class="c"><input type="checkbox" id="all" title="Select all"></th><th>Name</th><th class="s">Size</th><th></th></tr></thead><tbody id="list"></tbody></table>
 <p class="mut" id="mnhelp">Disk images (.dc42, .image, .img) must be stored contiguously; uploads here always are. "Mount next" makes
 ESFloppy insert that image in drive 1 every time it starts in FLOPPY mode, until cleared.</p>
+</section>
+<section id="tSet" hidden>
+<div class="card"><h3>Lisa</h3>
+<div class="row"><label class="k">Power</label><span id="sLisa">-</span></div>
+<div class="row"><label class="k">FPGA die</label><span id="sTemp">-</span></div>
+<div class="row"><button id="bPower">Press power button</button><button id="bReset" class="danger">Reset</button></div></div>
+<div class="card"><h3>ESP32 mode</h3>
+<div class="row"><div class="seg" id="sEsp"><button data-v="0">NORMAL</button><button data-v="1">WIFI FDD</button><button data-v="2">WIFI HDD</button></div></div>
+<div class="mut" id="sEspNote">NORMAL: both drives are drives. WIFI FDD / WIFI HDD: that drive's SD card is managed from the Files tab instead,
+and that drive is offline meanwhile. It can only change while the Lisa is off.</div></div>
+<div class="card"><h3>Display</h3>
+<div class="row"><label class="k" for="sRes">Resolution</label><select id="sRes"><option value="0">1080p30</option><option value="1">1080p60</option><option value="2">1024x768</option></select></div>
+<div class="row"><label class="k">Horizontal</label><button data-ax="2" data-d="-8">&laquo;</button><button data-ax="2" data-d="-1">&lsaquo;</button>
+<input type="number" id="sH" min="0"><button data-ax="2" data-d="1">&rsaquo;</button><button data-ax="2" data-d="8">&raquo;</button><span class="mut" id="sHl"></span></div>
+<div class="row"><label class="k">Vertical</label><button data-ax="3" data-d="-8">&laquo;</button><button data-ax="3" data-d="-1">&lsaquo;</button>
+<input type="number" id="sV" min="0"><button data-ax="3" data-d="1">&rsaquo;</button><button data-ax="3" data-d="8">&raquo;</button><span class="mut" id="sVl"></span></div>
+<div class="row"><label class="k" for="sCon">Max contrast</label><input type="checkbox" id="sCon"><span class="mut" id="sConJ"></span></div></div>
+<div class="card"><h3>CPU speed</h3>
+<div class="row"><select id="sSpd"><option value="0">Follow the SPEED switches</option><option value="1">5 MHz</option><option value="2">10 MHz</option>
+<option value="3">15 MHz</option><option value="4">18.75 MHz</option></select></div></div>
+<div class="bar"><button id="bSave">Save settings</button><span class="mut" id="sSaved"></span></div>
+<p class="mut">Changes apply at once, as in the on-screen menu, and are kept across a power cycle only after Save settings.</p>
+</section>
+<dialog id="rdlg"><p><b>Keep this resolution?</b></p><p class="mut">If the display went blank, do nothing: it goes back in <span id="rsec">15</span> s.</p>
+<div class="bar"><button id="rkeep">Keep</button><button id="rrevert">Go back now</button></div></dialog>
 </main><script>
 let cwd='/',mountNext='',names=new Set(),profile=false;
 const $=id=>document.getElementById(id);
@@ -48,7 +85,7 @@ const join=(d,n)=>(d.endsWith('/')?d:d+'/')+n;
 const isImg=n=>/\.(dc42|image|img)$/i.test(n);
 function msg(t,bad){const m=$('msg');m.textContent=t;m.className=t?(bad?'err':'ok'):'';}
 async function api(url,opt){const r=await fetch(url,opt);let j={};try{j=await r.json()}catch(e){}
- if(!r.ok)throw new Error(r.status==503?'No SD card server is reachable: set ESP32 MODE to WIFI FDD or WIFI HDD in the LisaFPGA menu.':(j.error||('HTTP '+r.status)));return j;}
+ if(!r.ok)throw new Error(r.status==503?'No SD card server is reachable: switch the board to WIFI FDD or WIFI HDD, below or on the Settings tab.':(j.error||('HTTP '+r.status)));return j;}
 function size(b){if(b<1024)return b+' B';if(b<1048576)return (b/1024).toFixed(1)+' KB';if(b<1073741824)return (b/1048576).toFixed(1)+' MB';return (b/1073741824).toFixed(2)+' GB';}
 function crumbs(){const c=$('crumb');c.innerHTML='';const parts=cwd.split('/').filter(Boolean);
  const add=(t,p)=>{const a=document.createElement('a');a.href='#';a.textContent=t;a.onclick=e=>{e.preventDefault();go(p)};c.append(a)};
@@ -85,7 +122,8 @@ async function load(){msg('');crumbs();const tb=$('list');tb.innerHTML='<tr><td 
     ta.append(r,' ',x);}
    tr.append(td,ts,ta);tb.append(tr);}
   if(!es.length)tb.innerHTML='<tr><td colspan=4 class=mut>Empty folder</td></tr>';
- }catch(e){tb.innerHTML='';msg(e.message,1);}
+ $('nosd').hidden=true;
+ }catch(e){tb.innerHTML='';msg(e.message,1);$('nosd').hidden=!/No SD card server/.test(e.message);}
  selChanged();}
 // Move: SdFat's rename moves only the directory entry, so data (and an image's contiguity) is untouched.
 async function moveSelected(){const sel=selected();if(!sel.length)return;
@@ -138,7 +176,7 @@ function upload(f){return new Promise((res,rej)=>{const x=new XMLHttpRequest();x
  x.setRequestHeader('X-Path',encodeURIComponent(join(cwd,f.name)));x.setRequestHeader('Content-Type','application/octet-stream');
  x.upload.onprogress=e=>{$('prog').max=e.total;$('prog').value=e.loaded;$('progt').textContent=f.name+' '+size(e.loaded)+' / '+size(e.total)};
  x.onload=()=>{let j={};try{j=JSON.parse(x.responseText)}catch(e){}
-  x.status==200?res():rej(new Error(x.status==503?'No SD card server is reachable: set ESP32 MODE to WIFI FDD or WIFI HDD.':x.status==507?'No contiguous space on the card for '+f.name:(j.error||'HTTP '+x.status)))};
+  x.status==200?res():rej(new Error(x.status==503?'No SD card server is reachable: switch the board to WIFI FDD or WIFI HDD (Settings tab).':x.status==507?'No contiguous space on the card for '+f.name:(j.error||'HTTP '+x.status)))};
  x.onerror=()=>rej(new Error('Upload failed'));x.send(f);});}
 $('file').onchange=async e=>{const fs=[...e.target.files];e.target.value='';$('prog').hidden=false;
  try{for(const f of fs)await upload(f);msg('Uploaded '+fs.length+' file(s)');}catch(err){msg(err.message,1);}
@@ -151,6 +189,55 @@ async function space(){const t=$('info'),b=$('infob');b.disabled=true;t.textCont
  catch(e){t.textContent='Card space: unavailable';}
  b.disabled=false;}
 $('infob').onclick=space;
+// ---- Settings tab: the FPGA's own settings, through the WiFi board's control channel (/api/fpga) ----
+let fst=null,fpoll=null;const ESPNOTE=$('sEspNote').textContent;
+async function fpga(url,opt){const r=await fetch(url,opt);let j={};try{j=await r.json()}catch(e){}
+ if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;}
+async function fset(reg,v){await fpga('/api/fpga/set?reg='+reg+'&value='+v,{method:'POST'});await frefresh();}
+async function fdo(f){try{msg('');await f();}catch(e){msg(e.message,1);}}
+function render(s){
+ $('sLisa').textContent=s.lisaOn?'On':'Off';
+ const t=$('sTemp');t.textContent=isNaN(s.tempC)?'-':s.tempC.toFixed(1)+' °C'+(s.tempC>=80?' (hot: 85 °C is its limit)':'');
+ t.className=s.tempC>=80?'warn':'';
+ document.querySelectorAll('#sEsp button').forEach(b=>{b.className=(+b.dataset.v===s.espMode)?'on':'';b.disabled=s.lisaOn;});
+ $('sEspNote').style.color=s.lisaOn?'var(--bad)':'';
+ $('sEspNote').textContent=s.lisaOn?'Locked while the Lisa is on. Shut it down first.':ESPNOTE;
+ const res=$('sRes');res.querySelector('option[value="2"]').disabled=!s.has1024;if(document.activeElement!==res)res.value=s.videoMode;
+ if(document.activeElement!==$('sH'))$('sH').value=s.hOff;$('sH').max=s.hLim;$('sHl').textContent='0 - '+s.hLim;
+ const vroom=s.vLim>0;if(document.activeElement!==$('sV'))$('sV').value=s.vOff;$('sV').max=s.vLim;
+ $('sVl').textContent=vroom?'0 - '+s.vLim:'no room in this mode';
+ document.querySelectorAll('[data-ax="3"],#sV').forEach(e=>e.disabled=!vroom);
+ $('sCon').checked=s.contrast;$('sConJ').textContent=s.contrastJumper?'(the MAX CONTRAST jumper is on; this flips it)':'';
+ if(document.activeElement!==$('sSpd'))$('sSpd').value=s.speedUserSet?s.speedIdx+1:0;
+ $('sSaved').textContent=s.saving?'Saving...':s.saved?'Saved settings are in flash.':'Nothing saved yet: defaults at power-up.';}
+async function frefresh(){try{const s=await fpga('/api/fpga');fst=s;render(s);}catch(e){msg(e.message,1);}}
+function showTab(set){$('tabF').className=set?'':'on';$('tabS').className=set?'on':'';$('tFiles').hidden=set;$('tSet').hidden=!set;msg('');
+ clearInterval(fpoll);if(set){frefresh();fpoll=setInterval(frefresh,3000);}else load();}
+$('tabF').onclick=()=>showTab(false);$('tabS').onclick=()=>showTab(true);
+// ESP32 mode, from the Settings tab or the Files tab's shortcut buttons. The chosen ESP32 restarts as the SD server.
+async function espMode(v){await fdo(async()=>{await fset(6,v);
+ msg(v?'Switching: the chosen drive restarts as the SD server, which takes a few seconds...':'Back to NORMAL: both drives are drives again.');
+ if(v&&!$('tFiles').hidden){setTimeout(()=>load().then(space),4000);}});}
+document.querySelectorAll('#sEsp button').forEach(b=>b.onclick=()=>espMode(+b.dataset.v));
+document.querySelectorAll('#nosd button').forEach(b=>b.onclick=()=>espMode(+b.dataset.esp));
+// Resolution, with a way back: the page runs on another screen, so if the display rejects the mode, it reverts by itself
+$('sRes').onchange=async()=>{const old=fst?fst.videoMode:0,nv=+$('sRes').value;if(nv===old)return;
+ await fdo(async()=>{await fset(1,nv);const d=$('rdlg');let left=15;$('rsec').textContent=left;
+  const back=async()=>{clearInterval(tm);if(d.open)d.close();await fdo(()=>fset(1,old));};
+  const tm=setInterval(()=>{left--;$('rsec').textContent=left;if(left<=0)back();},1000);
+  $('rkeep').onclick=()=>{clearInterval(tm);d.close();};$('rrevert').onclick=back;d.showModal();});};
+document.querySelectorAll('[data-ax]').forEach(b=>b.onclick=()=>{if(!fst)return;const ax=+b.dataset.ax,h=ax===2;
+ const cur=h?fst.hOff:fst.vOff,lim=h?fst.hLim:fst.vLim,v=Math.max(0,Math.min(lim,cur+(+b.dataset.d)));fdo(()=>fset(ax,v));});
+$('sH').onchange=()=>fdo(()=>fset(2,Math.max(0,+$('sH').value||0)));
+$('sV').onchange=()=>fdo(()=>fset(3,Math.max(0,+$('sV').value||0)));
+$('sCon').onchange=()=>fdo(()=>fset(4,$('sCon').checked?1:0));
+$('sSpd').onchange=()=>fdo(()=>fset(5,+$('sSpd').value));
+$('bSave').onclick=()=>fdo(async()=>{await fpga('/api/fpga/action?a=save',{method:'POST'});await frefresh();msg('Settings saved to flash.');});
+$('bPower').onclick=()=>{const on=fst&&fst.lisaOn;
+ if(confirm(on?'Press the Lisa’s power button? LOS will be asked to shut down, as with the real button.':'Press the Lisa’s power button to turn it on?'))
+  fdo(async()=>{await fpga('/api/fpga/action?a=power',{method:'POST'});msg('Power button pressed.');setTimeout(frefresh,1500);});};
+$('bReset').onclick=()=>{if(confirm('Reset the Lisa? This is a hard stop, like the real reset button: anything unsaved is lost, and a disk that was being written may need repairing.'))
+  fdo(async()=>{await fpga('/api/fpga/action?a=reset',{method:'POST'});msg('Reset pressed.');});};
 load().then(space);
 </script></body></html>
 )HTML";

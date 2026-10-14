@@ -276,6 +276,11 @@ set_false_path -to [get_cells esp_mode_sys_int_reg]
 set_false_path -to [get_cells esp_mode_dot_int_reg]
 ## The WIFI FDD / WIFI HDD target flag, synchronised into sysclk_fabric the same way.
 set_false_path -to [get_cells esp_hdd_sys_int_reg]
+## The WiFi board's virtual power and reset presses (lisanet_ctrl, sysclk) into COPCK_2x: 250 ms levels through
+## two-stage synchronisers in top.sv. (The settings path between lisanet_ctrl and HDMI_Interface is sysclk <->
+## clk_pixel, already bounded by the clock-level set_max_delay below.)
+set_false_path -to [get_cells ctrl_pwr_int_reg]
+set_false_path -to [get_cells ctrl_rst_int_reg]
 
 ## We do use the framerate select signals in some other places though, so they're fed through synchronizers in those cases
 ## We need false paths for those too

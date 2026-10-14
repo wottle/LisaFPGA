@@ -15,6 +15,9 @@ static const size_t MAX_DATA = 4096;
 struct Entry { bool dir; uint64_t size; String name; };
 
 void begin(HardwareSerial &port, int rxPin, int txPin, uint32_t baud);
+// Shared with fpgactl, which speaks the FPGA's own frames on the same link (never at the same time: one loop)
+HardwareSerial *linkPort();
+uint32_t crc32Update(uint32_t c, const uint8_t *p, size_t n);   // zlib CRC-32 running value (start FFFFFFFF, finish ^FFFFFFFF)
 
 int hello(String &firmware);
 int info(uint64_t &cardBytes, uint64_t &freeBytes);

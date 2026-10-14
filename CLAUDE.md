@@ -130,6 +130,27 @@ MODE lines are gated on presence in top.sv; after a 3 s power-up grace (so a sav
 absent board drops the mode to NORMAL, and it stays NORMAL if the board returns. **Patch-script lesson:** a Perl helper
 taking the replacement as an ordinary string interpolates `$1` BEFORE the match, silently deleting the anchored lines
 -- caught by xvlog. Use an inline `s~~$1~` or a placeholder substituted after the match.
+**FPGA control channel (2026-10-13, branch `feature/lisanet-control`): built (WNS +0.182 / WHS +0.049, 23030 LUTs
+36%), simulated, JTAG-tested -- WORKS; not yet in flash.** The web page's Settings tab changes the on-screen menu's
+settings (resolution with a 15 s auto-revert, H/V position, max contrast, CPU speed, ESP32 mode with the same Lisa-off
+lock, save), presses the Lisa's power and reset buttons, and shows Lisa on/off and the **die temperature** (an XADC in
+`lisanet_ctrl`, single-channel temp mode, ADCCLK 25 MHz). No extra wires: `lisanet_ctrl.sv` (sysclk) listens on J21
+GPIO5 in EVERY mode for `C3 3C 96 69` + CRC-32 frames and replies on GPIO4 after the serving ESP32's TX has been idle
+20 us (GPIO4 is now driven idle-high in NORMAL when a board is present). Writes reach HDMI_Interface as `web_req`
+{toggle, reg, value} applied on a frame tick (same block as the menu, so no multiple drivers); status comes back as
+`ctrl_status` (88 bits) through the existing clock-level set_max_delay. Power/reset are 250 ms virtual presses ANDed
+into `_PWRSW_int` / `_RSTSW_int` through COPCK_2x synchronisers (false paths, verified by effect). Rejected design: masking
+the ESP32's RX during a control frame -- the FPGA sees ALL traffic, so file data containing the marker would be corrupted
+on every retry; instead the 4-byte marker + CRC make false matches negligible and the XIAO picks seq so a control frame
+never contains A5. xsim testbench (scratchpad) covered STATUS, SET, bad CRC, LOCKED, the reply guard and ACTION; it also
+caught a double driver on `tx_en` (initial block + always_ff) that synthesis might have tolerated. XIAO: `fpgactl.cpp`,
+`/api/fpga*`, the Settings tab, `AT+FPGA` (prints the frame sent and every byte received -- that is how the bring-up
+fault was found). **Bring-up "FPGA not answering" was a misplaced orange wire (XIAO D7 must go to J21 pin 2 / GPIO4)**:
+SD link and control replies both died, since GPIO4 is the only line back to the XIAO. Check that wire first.
+**Lesson: never connect a USB-powered XIAO's VBUS/5V pin to anything.** A GND jumper slipped onto it shorted the PC's USB
+5 V, tripping its overcurrent protection: the PC's ports then gave power but no data (XIAO and board both "vanished"),
+until a PC reboot. Nothing on the board was damaged. The XIAO can instead be powered from J21 pin 8 (3V3; the board's TI
+regulators are rated 2-4 A) -- but never with its USB plugged in at the same time.
 **Data safety across mode switches.** The servers check MODE only between requests, so single operations are atomic;
 the risk was MULTI-request operations. Uploads (OPEN mode 3) and copies are now STAGED in `/.LISANET/UPLOAD.PRT` /
 `COPY.PRT` and moved into place in one request (the completing CLOSE, or the last COPY_STEP), which also does the

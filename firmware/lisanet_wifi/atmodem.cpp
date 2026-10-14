@@ -24,6 +24,7 @@
 #include "atmodem.h"
 #include "config.h"
 #include "sdlink.h"
+#include "fpgactl.h"
 #include "wifisetup.h"
 #include <WiFi.h>
 #include <Preferences.h>
@@ -203,11 +204,33 @@ static void cmdSdInfo() {
     ok();
 }
 
+// AT+FPGA: ask the FPGA for its status; on failure, show the request sent and every byte that came back
+static void cmdFpga() {
+    fpgactl::Status s;
+    int st = fpgactl::status(s);
+    if (st == fpgactl::OK) {
+        outf("FPGA v%u MODE %u H %u/%u V %u/%u LISA %s ESP32 %u TEMP %.1f C\r\n", s.version, s.videoMode, s.hOff, s.hLim,
+             s.vOff, s.vLim, s.lisaOn ? "ON" : "OFF", s.espMode, s.tempC);
+        ok();
+        return;
+    }
+    size_t n;
+    const uint8_t *f = fpgactl::lastFrame(n);
+    out("SENT");
+    for (size_t i = 0; i < n; i++) outf(" %02X", f[i]);
+    outln();
+    const uint8_t *r = fpgactl::lastRaw(n);
+    outf("GOT %u BYTES", (unsigned)n);
+    for (size_t i = 0; i < n; i++) outf(" %02X", r[i]);
+    outln();
+    error(fpgactl::statusName(st));
+}
+
 static void cmdHelp() {
     outln("AT  ATI  ATE0  ATE1  AT+HELP");
     outln("AT+WSCAN  AT+WJOIN=\"ssid\",\"password\"  AT+WJOIN");
     outln("AT+WSTATUS  AT+WIP  AT+WLEAVE  AT+WFORGET  AT+WSETUP");
-    outln("AT+WEBPASS=\"password\"  AT+WEB  AT+SDINFO");
+    outln("AT+WEBPASS=\"password\"  AT+WEB  AT+SDINFO  AT+FPGA");
     ok();
 }
 
@@ -240,6 +263,7 @@ static void runCommand(char *cmd) {
     else if (strcmp(c, "+WEB") == 0)           cmdWeb();
     else if (strcmp(c, "+WSETUP") == 0)        { wifisetup::startAP("AT+WSETUP"); outln("SETUP NETWORK " SETUP_AP_SSID " IS UP (PASSWORD " SETUP_AP_PASS ")"); ok(); }
     else if (strcmp(c, "+SDINFO") == 0)        cmdSdInfo();
+    else if (strcmp(c, "+FPGA") == 0)          cmdFpga();
     else                                       error("unknown command, try AT+HELP");
 }
 

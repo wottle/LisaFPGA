@@ -20,6 +20,9 @@
 //                                   and replaced in one step when the copy completes
 //   POST /api/copystep              {"copied":bytes,"total":bytes}: up to 1 MB more; repeat until copied == total
 //   GET  /api/mountnext             {"path":"..."};   POST /api/mountnext?path=   (empty clears)
+//   GET  /api/fpga                  the FPGA's settings and state (fpgactl::Status as JSON)
+//   POST /api/fpga/set?reg=&value=  a setting (fpgactl::Reg); 409 if the Lisa is on and reg is the ESP32 mode
+//   POST /api/fpga/action?a=save|power|reset   save settings, or press the Lisa's power or reset button
 // Errors are {"error":"..."} with 503 when ESFloppy can't be reached (ESP32 MODE not set to WIFI).
 //
 // Everything runs from loop() on one task, so the link to ESFloppy is never used by two things at once.
@@ -32,6 +35,7 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include "wifisetup.h"
+#include "fpgactl.h"
 
 namespace web {
 
@@ -376,6 +380,51 @@ static void handleMountNextSet() {
     sendStatus(sdlink::mountNextSet(server.arg("path")));
 }
 
+// ---- The FPGA itself (fpgactl): settings, ESP32 mode, power, reset, status ----------------------------------------
+static void sendFpgaResult(int s) {
+    if (s == fpgactl::OK) { server.send(200, "application/json", "{}"); return; }
+    int code = s == fpgactl::LOCKED ? 409 : s == fpgactl::BAD_REQUEST ? 400 : s == fpgactl::NO_REPLY ? 503 : 500;
+    const char *why = s == fpgactl::LOCKED ? "The Lisa is on: ESP32 mode can only change while it is off"
+                    : s == fpgactl::NO_REPLY ? "The FPGA is not answering (it needs the control-channel build)"
+                    : fpgactl::statusName(s);
+    server.send(code, "application/json", String("{\"error\":\"") + why + "\"}");
+}
+
+static void handleFpgaStatus() {
+    if (!authorized()) return;
+    fpgactl::Status s;
+    int st = fpgactl::status(s);
+    if (st != fpgactl::OK) { sendFpgaResult(st); return; }
+    char o[400];
+    snprintf(o, sizeof o,
+             "{\"version\":%u,\"videoMode\":%u,\"has1024\":%s,\"modeUserSet\":%s,\"hOff\":%u,\"hLim\":%u,\"vOff\":%u,"
+             "\"vLim\":%u,\"contrast\":%s,\"contrastJumper\":%s,\"speedUserSet\":%s,\"speedIdx\":%u,\"lisaOn\":%s,"
+             "\"espMode\":%u,\"saved\":%s,\"saving\":%s,\"rom3A\":%s,\"tempC\":%.1f}",
+             s.version, s.videoMode, s.has1024 ? "true" : "false", s.modeUserSet ? "true" : "false", s.hOff, s.hLim,
+             s.vOff, s.vLim, s.contrast ? "true" : "false", s.contrastJumper ? "true" : "false",
+             s.speedUserSet ? "true" : "false", s.speedIdx, s.lisaOn ? "true" : "false", s.espMode,
+             s.saved ? "true" : "false", s.saving ? "true" : "false", s.rom3A ? "true" : "false", s.tempC);
+    server.send(200, "application/json", o);
+}
+
+static void handleFpgaSet() {
+    if (!authorized()) return;
+    long reg = server.arg("reg").toInt(), value = server.arg("value").toInt();
+    if (reg < 1 || reg > 6 || value < 0 || value > 2047) { sendFpgaResult(fpgactl::BAD_REQUEST); return; }
+    int s = fpgactl::set((uint8_t)reg, (uint16_t)value);
+    if (s == fpgactl::OK && reg == fpgactl::REG_ESPMODE) lastGood = 0;   // a different SD server (or none) now
+    sendFpgaResult(s);
+}
+
+static void handleFpgaAction() {
+    if (!authorized()) return;
+    String a = server.arg("a");
+    uint8_t act = a == "save" ? fpgactl::ACT_SAVE : a == "power" ? fpgactl::ACT_POWER : a == "reset" ? fpgactl::ACT_RESET : 0;
+    if (!act) { sendFpgaResult(fpgactl::BAD_REQUEST); return; }
+    Serial.printf("[web] FPGA action: %s\r\n", a.c_str());
+    sendFpgaResult(fpgactl::action(act));
+}
+
 void begin() {
     nvs.begin(NVS_NAMESPACE, false);                 // read-write: the setup page can set the web password
     const char *keep[] = {"X-Path"};
@@ -393,6 +442,9 @@ void begin() {
     server.on("/api/mv", HTTP_POST, handleMv);
     server.on("/api/mountnext", HTTP_GET, handleMountNextGet);
     server.on("/api/mountnext", HTTP_POST, handleMountNextSet);
+    server.on("/api/fpga", HTTP_GET, handleFpgaStatus);
+    server.on("/api/fpga/set", HTTP_POST, handleFpgaSet);
+    server.on("/api/fpga/action", HTTP_POST, handleFpgaAction);
     server.on("/setup", HTTP_GET, handleSetupPage);
     server.on("/setup/info", HTTP_GET, handleSetupInfo);
     server.on("/setup/login", HTTP_POST, handleSetupLogin);

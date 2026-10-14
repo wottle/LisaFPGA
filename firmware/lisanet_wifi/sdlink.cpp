@@ -35,6 +35,9 @@ static void put64(uint8_t *p, uint64_t v) { for (int i = 0; i < 8; i++) { p[i] =
 static uint16_t get16(const uint8_t *p) { return p[0] | (uint16_t)p[1] << 8; }
 static uint64_t get64(const uint8_t *p) { uint64_t v = 0; for (int i = 7; i >= 0; i--) v = (v << 8) | p[i]; return v; }
 
+HardwareSerial *linkPort() { return port; }
+uint32_t crc32Update(uint32_t c, const uint8_t *p, size_t n) { return crcUpdate(c, p, n); }
+
 void begin(HardwareSerial &p, int rxPin, int txPin, uint32_t baud) {
     crcInit();
     port = &p;
