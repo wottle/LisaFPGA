@@ -23,6 +23,9 @@
 //   GET  /api/fpga                  the FPGA's settings and state (fpgactl::Status as JSON)
 //   POST /api/fpga/set?reg=&value=  a setting (fpgactl::Reg); 409 if the Lisa is on and reg is the ESP32 mode
 //   POST /api/fpga/action?a=save|power|reset   save settings, or press the Lisa's power or reset button
+//   GET  /api/fw                    this board's firmware: {"version","slot","pending","canRollBack","prev"}
+//   POST /api/fw/update             raw body: a new lisanet_wifi.ino.bin; installed into the other slot, then a restart
+//   POST /api/fw/rollback           go back to the previous firmware, then a restart
 // Errors are {"error":"..."} with 503 when ESFloppy can't be reached (ESP32 MODE not set to WIFI).
 //
 // Everything runs from loop() on one task, so the link to ESFloppy is never used by two things at once.
@@ -36,6 +39,7 @@
 #include <Preferences.h>
 #include "wifisetup.h"
 #include "fpgactl.h"
+#include "ota.h"
 
 namespace web {
 
@@ -425,8 +429,52 @@ static void handleFpgaAction() {
     sendFpgaResult(fpgactl::action(act));
 }
 
+// ---- This board's own firmware (ota.h) -------------------------------------------------------
+static void handleFwInfo() {
+    if (!authorized()) return;
+    server.send(200, "application/json", ota::infoJson());
+}
+
+static bool fwAuthed, fwOk;
+
+static void handleFwBody() {
+    HTTPRaw &raw = server.raw();
+    switch (raw.status) {
+        case RAW_START: {
+            String pass = nvs.getString("webpass", "");
+            fwAuthed = pass.length() && server.authenticate(WEB_USER, pass.c_str());
+            fwOk = fwAuthed && ota::start(server.clientContentLength());   // nothing is written without the password
+            break;
+        }
+        case RAW_WRITE:
+            if (fwOk) ota::write(raw.buf, raw.currentSize);
+            break;
+        case RAW_END:
+            if (fwOk) fwOk = ota::finish();
+            break;
+        case RAW_ABORTED:
+            if (fwOk) ota::abort();
+            fwOk = false;
+            break;
+    }
+}
+
+static void handleFwDone() {
+    if (!authorized()) return;
+    if (!fwOk) { server.send(400, "application/json", "{\"error\":\"" + jsonEscape(ota::error()) + "\"}"); return; }
+    server.send(200, "application/json", "{\"version\":\"" + jsonEscape(ota::newVersion()) + "\"}");
+    ota::restartSoon();
+}
+
+static void handleFwRollback() {
+    if (!authorized()) return;
+    if (!ota::rollBack()) { server.send(400, "application/json", "{\"error\":\"" + jsonEscape(ota::error()) + "\"}"); return; }
+    server.send(200, "application/json", "{}");
+    ota::restartSoon();
+}
+
 void begin() {
-    nvs.begin(NVS_NAMESPACE, false);                 // read-write: the setup page can set the web password
+    nvs.begin(NVS_NAMESPACE, false);                // read-write: the setup page can set the web password
     const char *keep[] = {"X-Path"};
     server.collectHeaders(keep, 1);
     server.on("/", HTTP_GET, handlePage);
@@ -445,6 +493,9 @@ void begin() {
     server.on("/api/fpga", HTTP_GET, handleFpgaStatus);
     server.on("/api/fpga/set", HTTP_POST, handleFpgaSet);
     server.on("/api/fpga/action", HTTP_POST, handleFpgaAction);
+    server.on("/api/fw", HTTP_GET, handleFwInfo);
+    server.on("/api/fw/update", HTTP_POST, handleFwDone, handleFwBody);
+    server.on("/api/fw/rollback", HTTP_POST, handleFwRollback);
     server.on("/setup", HTTP_GET, handleSetupPage);
     server.on("/setup/info", HTTP_GET, handleSetupInfo);
     server.on("/setup/login", HTTP_POST, handleSetupLogin);

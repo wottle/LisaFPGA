@@ -19,7 +19,9 @@
 // ---------------------------------------------------------------------------------------------
 #pragma once
 
-#define LISANET_WIFI_VERSION "0.1"
+#ifndef LISANET_WIFI_VERSION         // a test build can override it with -D
+#define LISANET_WIFI_VERSION "0.2"
+#endif
 
 #define LISA_RX_PIN   1        // D0
 #define LISA_TX_PIN   2        // D1

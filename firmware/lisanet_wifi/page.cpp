@@ -33,9 +33,9 @@ select,input[type=number]{font:inherit;padding:4px 6px;border:1px solid var(--li
 input[type=number]{width:80px}.warn{color:var(--bad);font-weight:600}
 </style></head><body><main>
 <h1>LisaNet <span class="mut" id="who"></span></h1>
-<nav class="tabs"><button id="tabF" class="on">Files</button><button id="tabS">Settings</button></nav>
+<nav class="tabs"><button id="tabS" class="on">Settings</button><button id="tabF">Files</button></nav>
 <div id="msg"></div>
-<section id="tFiles">
+<section id="tFiles" hidden>
 <div class="mut sp"><span id="info">Card space</span> <button id="infob" class="mini" title="Recalculate card space">&#x21bb;</button></div>
 <div class="bar" id="nosd" hidden><span class="mut">Switch the board to:</span><button data-esp="1">Manage ESFloppy's card (WIFI FDD)</button><button data-esp="2">Manage ESProFile's card (WIFI HDD)</button></div>
 <div class="bar"><span class="crumb" id="crumb"></span></div>
@@ -54,7 +54,7 @@ input[type=number]{width:80px}.warn{color:var(--bad);font-weight:600}
 <p class="mut" id="mnhelp">Disk images (.dc42, .image, .img) must be stored contiguously; uploads here always are. "Mount next" makes
 ESFloppy insert that image in drive 1 every time it starts in FLOPPY mode, until cleared.</p>
 </section>
-<section id="tSet" hidden>
+<section id="tSet">
 <div class="card"><h3>Lisa</h3>
 <div class="row"><label class="k">Power</label><span id="sLisa">-</span></div>
 <div class="row"><label class="k">FPGA die</label><span id="sTemp">-</span></div>
@@ -75,6 +75,12 @@ and that drive is offline meanwhile. It can only change while the Lisa is off.</
 <option value="3">15 MHz</option><option value="4">18.75 MHz</option></select></div></div>
 <div class="bar"><button id="bSave">Save settings</button><span class="mut" id="sSaved"></span></div>
 <p class="mut">Changes apply at once, as in the on-screen menu, and are kept across a power cycle only after Save settings.</p>
+<div class="card"><h3>WiFi board firmware</h3>
+<div class="row"><label class="k">Running</label><span id="fwRun">-</span></div>
+<div class="row"><label class="btn">Install update...<input type="file" id="fwFile" accept=".bin" hidden></label>
+<button id="fwBack" hidden></button><progress id="fwProg" max="1" value="0" hidden></progress><span class="mut" id="fwT"></span></div>
+<p class="mut">Choose <b>lisanet_wifi.ino.bin</b> from the firmware's build folder (not the .merged.bin). The board restarts into it.
+A new version has to run for 20 s before it is kept: if it crashes sooner, the board goes back to this one by itself.</p></div>
 </section>
 <dialog id="rdlg"><p><b>Keep this resolution?</b></p><p class="mut">If the display went blank, do nothing: it goes back in <span id="rsec">15</span> s.</p>
 <div class="bar"><button id="rkeep">Keep</button><button id="rrevert">Go back now</button></div></dialog>
@@ -211,8 +217,13 @@ function render(s){
  if(document.activeElement!==$('sSpd'))$('sSpd').value=s.speedUserSet?s.speedIdx+1:0;
  $('sSaved').textContent=s.saving?'Saving...':s.saved?'Saved settings are in flash.':'Nothing saved yet: defaults at power-up.';}
 async function frefresh(){try{const s=await fpga('/api/fpga');fst=s;render(s);}catch(e){msg(e.message,1);}}
+// Settings is the first tab; #files in the address keeps the Files tab across a reload. Card space (a slow FAT scan
+// on ESFloppy) is read the first time Files is shown.
+let spaced=false;
 function showTab(set){$('tabF').className=set?'':'on';$('tabS').className=set?'on':'';$('tFiles').hidden=set;$('tSet').hidden=!set;msg('');
- clearInterval(fpoll);if(set){frefresh();fpoll=setInterval(frefresh,3000);}else load();}
+ try{history.replaceState(null,'',location.pathname+(set?'':'#files'))}catch(e){}
+ clearInterval(fpoll);if(set){frefresh();fwInfo();fpoll=setInterval(frefresh,3000);}
+ else if(!spaced){spaced=true;load().then(space);}else load();}
 $('tabF').onclick=()=>showTab(false);$('tabS').onclick=()=>showTab(true);
 // ESP32 mode, from the Settings tab or the Files tab's shortcut buttons. The chosen ESP32 restarts as the SD server.
 async function espMode(v){await fdo(async()=>{await fset(6,v);
@@ -238,7 +249,28 @@ $('bPower').onclick=()=>{const on=fst&&fst.lisaOn;
   fdo(async()=>{await fpga('/api/fpga/action?a=power',{method:'POST'});msg('Power button pressed.');setTimeout(frefresh,1500);});};
 $('bReset').onclick=()=>{if(confirm('Reset the Lisa? This is a hard stop, like the real reset button: anything unsaved is lost, and a disk that was being written may need repairing.'))
   fdo(async()=>{await fpga('/api/fpga/action?a=reset',{method:'POST'});msg('Reset pressed.');});};
-load().then(space);
+// ---- This board's firmware: upload to the other slot, restart, wait for it to come back ----
+async function fwInfo(){try{const f=await fpga('/api/fw');
+ $('fwRun').textContent=f.version+' ('+f.slot+(f.pending?', on trial: kept after 20 s':'')+')';
+ const b=$('fwBack');b.hidden=!f.canRollBack;b.textContent='Go back to '+(f.prev||'the previous version');return f;}
+ catch(e){$('fwRun').textContent='-';return null;}}
+function fwBack(note){$('fwT').textContent=note+' Waiting for the board to come back...';let n=0;
+ const t=setInterval(async()=>{n++;const f=await fwInfo();
+  if(f){clearInterval(t);$('fwProg').hidden=true;$('fwT').textContent='';msg('The WiFi board is running firmware '+f.version+'.');}
+  else if(n>30){clearInterval(t);$('fwT').textContent='';msg('The board has not come back after a minute. Reload the page; if it still fails, check its USB console.',1);}},2000);}
+$('fwFile').onchange=e=>{const f=e.target.files[0];e.target.value='';if(!f)return;
+ if(/merged/i.test(f.name)&&!confirm(f.name+' looks like a merged image, which will be refused. Try anyway?'))return;
+ if(!confirm('Install '+f.name+' ('+size(f.size)+') on the WiFi board? It restarts afterwards; the page comes back in about 10 s.'))return;
+ msg('');const x=new XMLHttpRequest();x.open('POST','/api/fw/update');x.setRequestHeader('Content-Type','application/octet-stream');
+ $('fwProg').hidden=false;$('fwProg').value=0;
+ x.upload.onprogress=e=>{$('fwProg').max=e.total;$('fwProg').value=e.loaded;$('fwT').textContent='Uploading '+size(e.loaded)+' / '+size(e.total)};
+ x.onload=()=>{let j={};try{j=JSON.parse(x.responseText)}catch(e){}
+  if(x.status==200){$('fwT').textContent='';fwBack('Installed '+(j.version||'')+', restarting.');}
+  else{$('fwProg').hidden=true;$('fwT').textContent='';msg(j.error||('HTTP '+x.status),1);}};
+ x.onerror=()=>{$('fwProg').hidden=true;$('fwT').textContent='';msg('Upload failed',1);};x.send(f);};
+$('fwBack').onclick=()=>{if(!confirm($('fwBack').textContent+'? The board restarts.'))return;
+ fdo(async()=>{await fpga('/api/fw/rollback',{method:'POST'});fwBack('Going back.');});};
+showTab(location.hash!=='#files');
 </script></body></html>
 )HTML";
 }  // namespace web

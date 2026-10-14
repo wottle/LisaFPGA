@@ -151,6 +151,21 @@ SD link and control replies both died, since GPIO4 is the only line back to the 
 5 V, tripping its overcurrent protection: the PC's ports then gave power but no data (XIAO and board both "vanished"),
 until a PC reboot. Nothing on the board was damaged. The XIAO can instead be powered from J21 pin 8 (3V3; the board's TI
 regulators are rated 2-4 A) -- but never with its USB plugged in at the same time.
+**XIAO firmware updates over WiFi (2026-10-14): WORK on hardware -- all four tests passed** (0.2 -> 0.3 over WiFi;
+a crash-test build rolled back to 0.3 by itself; manual "Go back to 0.2"; a .merged.bin refused). `ota.cpp`, the
+"WiFi board firmware" card on the Settings tab (which is now the FIRST tab; `#files` keeps Files across a reload),
+`/api/fw`, `/api/fw/update` (raw body, password checked at RAW_START), `/api/fw/rollback`. The default 8 MB partition
+table already has two 3.2 MB app slots (the app is ~1 MB), so no repartitioning; the XIAO needed one last USB flash.
+Safety: an upload must contain `LISANET-WIFI-FW/<version>` (so ESFloppy/ESProFile builds, bootloaders and merged images
+are refused; a merged image is also too big for a slot), ESP-IDF verifies the image before it becomes bootable, and the
+core's rollback (`CONFIG_APP_ROLLBACK_ENABLE=y` in this core) is kept pending by overriding `verifyRollbackLater()`
+until the image has run 20 s -- a crash before then reverts to the previous slot at the next reset. A pending image
+refuses a further update until it is kept. Gotchas: (1) `__attribute__((used))` does NOT survive `--gc-sections` --
+the tag was silently missing from the binary until boot code printed it; grep the .bin for the tag. (2) The search
+string is itself in the image, followed by a NUL, so a match only counts with a printable version after it. (3) Inside
+`namespace ota`, a bare `abort()` calls `ota::abort()` -- the crash hook needs `::abort()`. Test builds:
+`--build-property 'compiler.cpp.extra_flags=-DLISANET_WIFI_VERSION="0.3"'` (config.h's version is `#ifndef`-guarded;
+`-DLISANET_TEST_CRASH` adds a deliberate crash 5 s after boot); changing flags rebuilds the whole core (~5 min each).
 **Data safety across mode switches.** The servers check MODE only between requests, so single operations are atomic;
 the risk was MULTI-request operations. Uploads (OPEN mode 3) and copies are now STAGED in `/.LISANET/UPLOAD.PRT` /
 `COPY.PRT` and moved into place in one request (the completing CLOSE, or the last COPY_STEP), which also does the

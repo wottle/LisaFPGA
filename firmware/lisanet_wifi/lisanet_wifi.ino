@@ -6,6 +6,7 @@
 #include "atmodem.h"
 #include "web.h"
 #include "wifisetup.h"
+#include "ota.h"
 
 static HardwareSerial LinkPort(1);   // to ESFloppy's SD server
 static HardwareSerial LisaPort(2);   // the Lisa's Serial A
@@ -15,6 +16,7 @@ void setup() {
     Serial.setTxTimeoutMs(0);         // never block if nothing is reading the USB console
     delay(200);
     Serial.println("\r\n[lisanet] LisaNet WiFi board " LISANET_WIFI_VERSION);
+    ota::begin();
 
     sdlink::begin(LinkPort, LINK_RX_PIN, LINK_TX_PIN, LINK_BAUD);
     atmodem::begin(LisaPort);
@@ -27,5 +29,6 @@ void loop() {
     atmodem::poll();
     web::poll();
     wifisetup::poll();
+    ota::poll();
     delay(1);
 }
