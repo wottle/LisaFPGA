@@ -176,7 +176,9 @@ module top(
     //   1'b1 = all three modes available (needs hdmi_clock_divider_1024x768; see tools/vivado_scripts/)
     //   1'b0 = 1080p30 and 1080p60 only; the 1024x768 clock mux stage and its whole scaling path fold away as
     //          dead code, giving a leaner build for boards that will never drive a 1024x768 panel
-    localparam logic OUTPUT_1024X768 = 1'b1;
+    // 0 since 2026-10-16: dropping it removes the 1024x768 MMCM and its scaling path (heat), and 1080p users lose
+    // nothing. Turning it back on needs hdmi_clock_generator_1024x768 restored in HDMI_Interface (see the note there).
+    localparam logic OUTPUT_1024X768 = 1'b0;
 
     // Horizontal placement of the image within the 1080p frame. The Lisa image is narrower than 1920 (1440 wide for
     // H ROMs, 1216 for 3A ROMs), so there's spare width to distribute; by default it's split evenly as left/right
@@ -1247,7 +1249,8 @@ module top(
     if (USB_HOST_SOFTCPU) begin : g_usb_softcpu
         // Both ports belong to one CPU, which also tracks every device behind any hub on them. The
         // firmware image is tools/usb_fw's build output (usb_host_fw.mem, a project source file).
-        usb_softcpu #(.FIRMWARE("usb_host_fw.mem"), .CLK_MHZ(60)) usb_host (
+        // usbclk_core is 59.975MHz (742.1875 / 12.375, from the 1080p MMCM), so the 1 ms frame is 59975 clocks: exactly 1.000 ms
+        usb_softcpu #(.FIRMWARE("usb_host_fw.mem"), .CLK_MHZ(60), .FRAME_CLKS(59975)) usb_host (
             .clk(usbclk_core), .reset(usb_core_rst),
             .usb_dp_i({usb_dp_in_port1, usb_dp_in_port0}), .usb_dm_i({usb_dm_in_port1, usb_dm_in_port0}),
             .usb_dp_o({usb_dp_out_port1, usb_dp_out_port0}), .usb_dm_o({usb_dm_out_port1, usb_dm_out_port0}),

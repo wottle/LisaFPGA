@@ -243,16 +243,18 @@ set_false_path -to [get_pins -quiet lisa_hdmi_output/bufgmux_clk_pixel_x5_a/CE*]
 ## as the dotck_A/dotck_B daisy-chained mux nets above; nobody cares if these intermediate clocks have skew.
 ## NOTE: these nets are INSIDE the IP instance ("<ip_instance>/inst/<port_name>"), not at the HDMI_Interface
 ## level -- naming them at the wrong level makes get_nets match nothing and the constraint silently do nothing.
-set_property CLOCK_DEDICATED_ROUTE ANY_CMT_COLUMN [get_nets lisa_hdmi_output/hdmi_clock_generator_1024x768/inst/clk_pixel_1024x768]
-set_property CLOCK_DEDICATED_ROUTE ANY_CMT_COLUMN [get_nets lisa_hdmi_output/hdmi_clock_generator_1024x768/inst/clk_pixel_x5_1024x768]
+## (Only in a build with OUTPUT_1024X768 = 1, where the MMCM sits inside the generate block g_clk_1024x768; -quiet and
+## wildcarded so a build without it stays silent. If they ever match nothing in a 1024x768 build, fix the path.)
+set_property CLOCK_DEDICATED_ROUTE ANY_CMT_COLUMN [get_nets -quiet lisa_hdmi_output/*hdmi_clock_generator_1024x768/inst/clk_pixel_1024x768]
+set_property CLOCK_DEDICATED_ROUTE ANY_CMT_COLUMN [get_nets -quiet lisa_hdmi_output/*hdmi_clock_generator_1024x768/inst/clk_pixel_x5_1024x768]
 
 ## Another HDMI-related thing: we need to set false paths for the select signals going into the HDMI clock muxes
 ## They're generated in the "user flipping switches" domain and we can't synchronize them to any of the pixel clock domains since they feed into the clock muxes themselves
 ## So just declare false paths and call it there
 ## (The BUFGMUXes and framerate synchronizers are always instantiated regardless of OUTPUT_1024X768 -- only the
 ## second BUFGMUX input, and what video_id_code/frame timing that maps to, changes -- see HDMI_Interface.sv)
-set_false_path -to [get_pins lisa_hdmi_output/bufgmux_clk_pixel/CE*]
-set_false_path -to [get_pins lisa_hdmi_output/bufgmux_clk_pixel_x5/CE*]
+set_false_path -to [get_pins -quiet lisa_hdmi_output/*bufgmux_clk_pixel/CE*]
+set_false_path -to [get_pins -quiet lisa_hdmi_output/*bufgmux_clk_pixel_x5/CE*]
 
 ## The three DOTCK clock muxes need exactly the same treatment, for exactly the same reason: SPEED_SEL is a
 ## physical switch in the "user flipping things" domain feeding a clock mux select, so there's no sensible
@@ -295,7 +297,8 @@ set_false_path -from [get_cells -hierarchical -filter {NAME =~ *lnet_cfg_*_reg*}
 ## samples the read data cycles after the strobe (DTACK), so bound these with a datapath-only delay well inside one
 ## C16M cycle rather than timing edge-to-edge between the related clocks. Verify by EFFECT after implementation.
 set_max_delay -datapath_only -from [get_clocks -quiet dotck_*] -to [get_cells -hierarchical -filter {NAME =~ *_FDC_RAM/fdcram_*}] 40.000
-set_max_delay -datapath_only -from [get_cells -hierarchical -filter {NAME =~ *_FDC_RAM/fdcram_q_reg*}] -to [get_clocks -quiet dotck_*] 40.000
+## (The read data back to the 68K is timed normally: synthesis made the RAM a RAMB18 with its read register inside,
+## so there is no separate fdcram_q register to bound, and that path met timing as an ordinary related-clock path.)
 
 ## We do use the framerate select signals in some other places though, so they're fed through synchronizers in those cases
 ## We need false paths for those too
@@ -312,7 +315,9 @@ set_false_path -to [get_cells lisa_hdmi_output/framerate_sel_int_pixel_x5_reg]
 ## 1546 is the 1080p30 value; in the other two modes this is off by up to 2x. That only costs STA precision on
 ## a ~48KHz domain feeding a couple of audio synchronizer flops, all of which are false-pathed anyway, so it
 ## has no bearing on functional correctness -- but do not read the reported clk_audio frequency as truth.
-create_generated_clock -name clk_audio -source [get_pins lisa_hdmi_output/bufgmux_clk_pixel/O] -divide_by 1546 [get_pins lisa_hdmi_output/buf_audio/O]
+## 2026-10-16: OUTPUT_1024X768 = 0 builds have no stage-B mux, so the pixel clock IS bufgmux_clk_pixel_a/O. A build WITH
+## 1024x768 must point this back at the stage-B mux (now inside the generate block g_mux_1024x768).
+create_generated_clock -name clk_audio -source [get_pins lisa_hdmi_output/bufgmux_clk_pixel_a/O] -divide_by 1546 [get_pins lisa_hdmi_output/buf_audio/O]
 
 ## clk_audio is ~48KHz and the pixel clocks are 65-148.5MHz, so every path between them is a slow-to-fast
 ## handoff that is stable for thousands of pixel clocks -- there is no phase relationship worth analysing.

@@ -15,7 +15,8 @@
 // ---------------------------------------------------------------------------------------------
 module usb_softcpu #(
     parameter FIRMWARE = "usb_host_fw.mem",
-    parameter CLK_MHZ  = 60
+    parameter CLK_MHZ  = 60,
+    parameter FRAME_CLKS = CLK_MHZ * 1000   // clocks per 1 ms USB frame (see usb_sie)
 ) (
     input  logic        clk,
     input  logic        reset,           // active high, synchronous to clk
@@ -109,7 +110,7 @@ module usb_softcpu #(
     wire        bus_wr   = mem_valid && !mem_ready && |mem_wstrb;
     logic [31:0] sie_q [2];
     for (genvar p = 0; p < 2; p++) begin : sie
-        usb_sie #(.CLK_MHZ(CLK_MHZ)) port (
+        usb_sie #(.CLK_MHZ(CLK_MHZ), .FRAME_CLKS(FRAME_CLKS)) port (
             .clk (clk), .reset (reset),
             .bus_we (bus_wr && (p == 0 ? sel_sie0 : sel_sie1)), .bus_addr (mem_addr[7:0]),
             .bus_wdata (mem_wdata), .bus_wstrb (mem_wstrb), .bus_rdata (sie_q[p]),

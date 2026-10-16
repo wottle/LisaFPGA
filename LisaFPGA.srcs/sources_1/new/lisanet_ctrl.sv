@@ -24,7 +24,8 @@
 //                                                 (0 Sony, 1 Twiggy), 12 RAM size (0 = switches, 1-4 = 512K-2MB)
 //            0x03 ACTION u8 action             -> status. 1 save settings, 2 press the power button, 3 press reset,
 //                                                 4 press NMI
-// Status: 0 OK, 1 BAD_REQUEST, 2 LOCKED (regs 6 and 10-12 while the Lisa is on), 3 TIMEOUT, 4 UNKNOWN_CMD.
+// Status: 0 OK, 1 BAD_REQUEST, 2 LOCKED (regs 10-12, and reg 6 except value 0 = NORMAL, while the Lisa is on),
+//         3 TIMEOUT, 4 UNKNOWN_CMD.
 //
 // Settings live in HDMI_Interface (clk_pixel domain), which applies a write on its next frame tick with the same
 // limits and locks as the on-screen menu. web_req is {toggle, reg[3:0], value[10:0]}: the data is set, then the
@@ -254,7 +255,10 @@ module lisanet_ctrl (
                     case (cmd)
                         8'h01: ;                                                    // STATUS: just the block
                         8'h02: if (len != 8'd3 || pay[0] == 8'd0 || pay[0] == 8'd7 || pay[0] > 8'd12) status <= 8'd1;
-                               else if ((pay[0] == 8'd6 || pay[0] >= 8'd10) && lisa_on_snap) status <= 8'd2;
+                               // Locked while the Lisa is on: the ROMs, RAM size, and ESP32 mode -- except back to
+                               // NORMAL (value 0), which only brings a drive back online and is always safe
+                               else if (((pay[0] == 8'd6 && {pay[2], pay[1]} != 16'd0) || pay[0] >= 8'd10) && lisa_on_snap)
+                                   status <= 8'd2;
                                else begin
                                    web_req  <= {~web_req[15], pay[0][3:0], pay[2][2:0], pay[1]};
                                    wait_cnt <= 25'd0;

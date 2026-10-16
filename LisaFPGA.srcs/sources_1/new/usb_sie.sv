@@ -30,7 +30,10 @@
 //                6 CRC error, 7 PID/bit-stuff error, 8 babble
 // ---------------------------------------------------------------------------------------------
 module usb_sie #(
-    parameter int CLK_MHZ = 60
+    parameter int CLK_MHZ = 60,
+    // Clocks per 1 ms frame (SOF interval: 1.000 ms +-500 ns for a full-speed host). Override when the clock is not
+    // exactly CLK_MHZ: LisaFPGA runs this at 59.975MHz (742.1875 / 12.375), so it passes 59975.
+    parameter int FRAME_CLKS = CLK_MHZ * 1000
 ) (
     input  logic        clk,
     input  logic        reset,
@@ -49,7 +52,7 @@ module usb_sie #(
 );
     localparam int FS_DIV = CLK_MHZ / 12;       // 5
     localparam int LS_DIV = CLK_MHZ * 2 / 3;    // 40
-    localparam int FRAME  = CLK_MHZ * 1000;     // clocks per 1 ms frame
+    localparam int FRAME  = FRAME_CLKS;          // clocks per 1 ms frame
     localparam int ATTACH = CLK_MHZ * 5 / 2;    // 2.5 us of steady line state = attach / detach
     // A transaction may start only this many clocks before the next SOF. Worst cases: 64-byte full-speed
     // IN ~720 bit times = 3600 clocks; 8-byte low-speed transaction with PRE ~220 bit times = 8800 clocks.

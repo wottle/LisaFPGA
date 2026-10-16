@@ -52,7 +52,7 @@ module HDMI_Interface #(
     // WiFi board presence: J21 GPIO5, the board's serial TX into the FPGA, which idles HIGH whenever a board is
     // powered and wired, against an XDC pull-down that holds it LOW when nothing is there. No board, no ESP32 MODE row.
     input  logic        wifi_board_line,
-    output logic        wifi_board_present,
+    output logic        wifi_board_present = 1'b0,
     // The WiFi board's settings writes, from lisanet_ctrl (sysclk domain): {toggle, reg[3:0], value[10:0]}, data held
     // until web_ack follows the toggle. Applied on a frame tick with the same limits and locks as the menu. reg: 1 video
     // mode, 2 H offset, 3 V offset (the live mode's), 4 max contrast, 5 CPU speed (0 = switches, 1-4), 6 ESP32 mode,
@@ -104,8 +104,13 @@ module HDMI_Interface #(
     // Instantiate the MMCM for our stock 1080p30/1080p60 pixel clocks and their 5x pixel clocks
     // It always generates both framerates simultaneously regardless of OUTPUT_1024X768 -- this way,
     // flipping OUTPUT_1024X768 (see top.sv) never requires regenerating this IP; just flip the parameter and rebuild
+    // It also makes the USB host's clock (2026-10-16): CLKOUT0, the only fractional output, at 742.1875 / 12.375 =
+    // 59.975MHz (-0.042%, inside full-speed's +-0.05%; usb_sie counts 59975 clocks per 1 ms frame). The IP is in the
+    // Clocking Wizard's OVERRIDE_MMCM mode with M = 11.875, D = 2 and the 1080p dividers 1/2/5/10 pinned: left to
+    // itself the wizard moved the VCO to 750MHz to make an exact 60MHz, which would have put the 1080p clocks 1% off.
     hdmi_clock_divider hdmi_clock_generator (
         .sysclk(sysclk),
+        .usbclk_fs(usbclk_fs),    // BUFG'd inside the IP; out to top.sv for the USB host
         .clk_pixel_x5_1080p60(clk_pixel_x5_1080p60),
         .clk_pixel_x5_1080p30(clk_pixel_x5_1080p30),
         .clk_pixel_1080p60(clk_pixel_1080p60),
@@ -125,24 +130,27 @@ module HDMI_Interface #(
     // VCO down for 65/325MHz landed ~3.8%/14.2% off nominal, and worse, the ratio between those two
     // came out to 5.5, not the exact 5 that TMDS/OSERDES2 serialization requires. A dedicated MMCM
     // with its own VCO, unconstrained by the 1080p outputs, can hit both frequencies (and their exact
-    // 5x ratio) cleanly. Like hdmi_clock_divider above, this always generates its clocks regardless of
-    // OUTPUT_1024X768. See tools/vivado_scripts/add_1024x768_clocks.tcl for how this IP is created.
-    // It also makes the USB host's 60MHz clock (2026-10-15): its VCO is 975MHz, and 975 / 16.25 is exactly 60.000MHz on
-    // CLKOUT0, the only output with a fractional divider -- so the USB clock is output 1 and 65/325MHz are outputs 2/3
-    // (975/15, 975/3, still exactly 5:1). That retired the separate usb_fs_clock MMCM (~0.12W, i.e. heat).
-    hdmi_clock_divider_1024x768 hdmi_clock_generator_1024x768 (
-        .sysclk(sysclk),
-        .usbclk_fs(usbclk_fs),    // BUFG'd inside the IP; out to top.sv for the USB host
-        .clk_pixel_1024x768(clk_pixel_1024x768),
-        .clk_pixel_x5_1024x768(clk_pixel_x5_1024x768),
-        .clkfb_in(clk_feedback_in_1024x768),
-        .clkfb_out(clk_feedback_out_1024x768)
-    );
-    // Give it its own feedback path through a BUFG, same as the IP above
-    BUFG hdmi_clk_feedback_1024x768 (
-        .I(clk_feedback_out_1024x768),
-        .O(clk_feedback_in_1024x768)
-    );
+    // 5x ratio) cleanly. See tools/vivado_scripts/add_1024x768_clocks.tcl for how this IP is created.
+    // Built only when OUTPUT_1024X768 is set (since 2026-10-16; together with the second BUFGMUX stage below): an MMCM
+    // runs whether or not its clocks are selected, so a build without 1024x768 should not carry one -- it is heat.
+    // (Its CLAUDE.md-documented XDC lines then match nothing and log harmless warnings.)
+    generate if (OUTPUT_1024X768) begin : g_clk_1024x768
+        hdmi_clock_divider_1024x768 hdmi_clock_generator_1024x768 (
+            .sysclk(sysclk),
+            .clk_pixel_1024x768(clk_pixel_1024x768),
+            .clk_pixel_x5_1024x768(clk_pixel_x5_1024x768),
+            .clkfb_in(clk_feedback_in_1024x768),
+            .clkfb_out(clk_feedback_out_1024x768)
+        );
+        // Give it its own feedback path through a BUFG, same as the IP above
+        BUFG hdmi_clk_feedback_1024x768 (
+            .I(clk_feedback_out_1024x768),
+            .O(clk_feedback_in_1024x768)
+        );
+    end else begin : g_no_clk_1024x768
+        assign clk_pixel_1024x768 = 1'b0;
+        assign clk_pixel_x5_1024x768 = 1'b0;
+    end endgenerate
     // ------------------------------------------------------------------------------------------------------
     // Three-way runtime mode selection: 1080p30, 1080p60, 1024x768
     // ------------------------------------------------------------------------------------------------------
@@ -187,24 +195,30 @@ module HDMI_Interface #(
         .S(sel_60),
         .O(clk_pixel_a)
     );
-    BUFGMUX bufgmux_clk_pixel (
-        .I0(clk_pixel_a),
-        .I1(clk_pixel_1024x768),
-        .S(sel_1024),
-        .O(clk_pixel)
-    );
     BUFGMUX bufgmux_clk_pixel_x5_a (
         .I0(clk_pixel_x5_1080p30),
         .I1(clk_pixel_x5_1080p60),
         .S(sel_60),
         .O(clk_pixel_x5_a)
     );
-    BUFGMUX bufgmux_clk_pixel_x5 (
-        .I0(clk_pixel_x5_a),
-        .I1(clk_pixel_x5_1024x768),
-        .S(sel_1024),
-        .O(clk_pixel_x5)
-    );
+    // Stage B only exists in a build with 1024x768; without it the 1080p mux output IS the pixel clock
+    generate if (OUTPUT_1024X768) begin : g_mux_1024x768
+        BUFGMUX bufgmux_clk_pixel (
+            .I0(clk_pixel_a),
+            .I1(clk_pixel_1024x768),
+            .S(sel_1024),
+            .O(clk_pixel)
+        );
+        BUFGMUX bufgmux_clk_pixel_x5 (
+            .I0(clk_pixel_x5_a),
+            .I1(clk_pixel_x5_1024x768),
+            .S(sel_1024),
+            .O(clk_pixel_x5)
+        );
+    end else begin : g_no_mux_1024x768
+        assign clk_pixel = clk_pixel_a;
+        assign clk_pixel_x5 = clk_pixel_x5_a;
+    end endgenerate
 
     // Frame timing in hdmi.sv is derived entirely from this, so it must track video_mode exactly.
     logic [6:0] video_id_code;
@@ -658,7 +672,9 @@ module HDMI_Interface #(
             end
         end
     end
-    assign wifi_board_present = (wifi_seen_cnt != 8'd0);
+    // Registered: it feeds the menu's row mapping and drawing, the tightest path at 1080p60 (wifi_seen_cnt ->
+    // menu_pixel was 11 levels and missed by 107 ps on 2026-10-16). One clock of delay is invisible here.
+    always_ff @(posedge clk_pixel) wifi_board_present <= (wifi_seen_cnt != 8'd0);
     // Settings writes from the WiFi board (see the web_req port): only the toggle is synchronised; the data bits were
     // set at least a sysclk earlier and are held until web_ack answers, so they are stable when the toggle arrives.
     (* ASYNC_REG = "TRUE" *) logic web_tog_int = 1'b0, web_tog_s = 1'b0;
@@ -874,11 +890,14 @@ module HDMI_Interface #(
                             // Takes effect at once (the chosen
                             // ESP32 restarts into its SD-server personality); it is only remembered across a power
                             // cycle if SAVE SETTINGS is used.
-                            3'd0: if (!lisa_on) begin                                  // DISABLED while it's on
+                            3'd0: if (!lisa_on) begin                                  // cycles while the Lisa is off
                                 if (!esp_wifi_mode)       esp_wifi_mode  <= 1'b1;
                                 else if (!esp_target_hdd) esp_target_hdd <= 1'b1;
                                 else begin                esp_wifi_mode  <= 1'b0; esp_target_hdd <= 1'b0; end
-                            end
+                            end else begin                                             // Lisa on: only back to NORMAL --
+                                esp_wifi_mode  <= 1'b0;                                // that brings the drive back online,
+                                esp_target_hdd <= 1'b0;                                // which is always safe; entering a
+                            end                                                        // WIFI mode would yank a drive
                             3'd6: start_save();                                         // SAVE SETTINGS
                             default: menu_active <= 1'b0;                              // EXIT
                         endcase
@@ -943,7 +962,11 @@ module HDMI_Interface #(
                           speed_user_set <= 1'b1;
                           speed_idx      <= web_req[1:0] - 1'b1;
                       end
-                4'd6: if (!lisa_on && wifi_board_present) begin
+                // ESP32 mode: back to NORMAL (0) at any time; a WIFI mode only with the Lisa off and a board present
+                4'd6: if (web_req[10:0] == 11'd0) begin
+                          esp_wifi_mode  <= 1'b0;
+                          esp_target_hdd <= 1'b0;
+                      end else if (!lisa_on && wifi_board_present) begin
                           esp_wifi_mode  <= (web_req[10:0] == 11'd1) || (web_req[10:0] == 11'd2);
                           esp_target_hdd <= (web_req[10:0] == 11'd2);
                       end
@@ -1418,7 +1441,8 @@ module HDMI_Interface #(
             3'd3: m_vid = (v_limit == 11'd0) ? 4'd9 : 4'd0;       // ADJUST VERT: NO ROOM where it can't move
             3'd4: m_vid = speed_user_set ? (4'd11 + 4'(speed_idx)) : 4'd10; // CPU SPEED
             3'd5: m_vid = contrast_eff  ? 4'd3 : 4'd4;
-            3'd0: m_vid = lisa_on ? 5'd18 : esp_wifi_mode ? (esp_target_hdd ? 5'd17 : 5'd16) : 5'd15; // ESP32 MODE
+            // ESP32 MODE: DISABLED only for NORMAL with the Lisa on (a WIFI mode still shows, and OK returns it to NORMAL)
+            3'd0: m_vid = esp_wifi_mode ? (esp_target_hdd ? 5'd17 : 5'd16) : lisa_on ? 5'd18 : 5'd15;
             // SAVING wins over both, so a repeat save on an already-saved board still shows something happening
             3'd6: m_vid = save_active ? 4'd8 : (settings_valid_q ? 4'd6 : 4'd7);
             default: m_vid = 4'd0;                        // EXIT has no value
