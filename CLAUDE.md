@@ -131,7 +131,7 @@ absent board drops the mode to NORMAL, and it stays NORMAL if the board returns.
 taking the replacement as an ordinary string interpolates `$1` BEFORE the match, silently deleting the anchored lines
 -- caught by xvlog. Use an inline `s~~$1~` or a placeholder substituted after the match.
 **FPGA control channel (2026-10-13, branch `feature/lisanet-control`): built (WNS +0.182 / WHS +0.049, 23030 LUTs
-36%), simulated, JTAG-tested -- WORKS; not yet in flash.** The web page's Settings tab changes the on-screen menu's
+36%), simulated, JTAG-tested -- WORKS; FLASHED 2026-10-14 (3 MHz, use_file; cold-boot check pending).** The web page's Settings tab changes the on-screen menu's
 settings (resolution with a 15 s auto-revert, H/V position, max contrast, CPU speed, ESP32 mode with the same Lisa-off
 lock, save), presses the Lisa's power and reset buttons, and shows Lisa on/off and the **die temperature** (an XADC in
 `lisanet_ctrl`, single-channel temp mode, ADCCLK 25 MHz). No extra wires: `lisanet_ctrl.sv` (sysclk) listens on J21
@@ -151,6 +151,116 @@ SD link and control replies both died, since GPIO4 is the only line back to the 
 5 V, tripping its overcurrent protection: the PC's ports then gave power but no data (XIAO and board both "vanished"),
 until a PC reboot. Nothing on the board was damaged. The XIAO can instead be powered from J21 pin 8 (3V3; the board's TI
 regulators are rated 2-4 A) -- but never with its USB plugged in at the same time.
+**Web overrides of jumpers/switches + NMI (control version 2, 2026-10-14): built (WNS +0.206 / WHS +0.055, 0 failing
+setup/hold, only the 10 known pulse-width entries; 23239 LUTs 36.7%, 41 BRAM), simulated; NOT yet hardware-tested or
+flashed.** Web page only (no menu rows): SET regs 8 scanlines, 9 inverse video, 10 CPU ROM, 11 I/O ROM, 12 RAM size
+(0 = jumpers, 1-4); 10-12 LOCKED while the Lisa is on (FPGA-enforced in lisanet_ctrl AND HDMI_Interface); ACTION 4 = NMI
+(250 ms press, COPCK_2x synchroniser `ctrl_nmi_int/sync` ORed into `_NMI`). Toggles XOR onto the pins like MAX CONTRAST
+(web asks for the effective value); RAM is follow-or-override like CPU SPEED. HDMI_Interface holds them
+(`lnet_cfg_*`, `cfg_pins` in / `cfg_ovr` out); top.sv derives `invid_eff` / `cpu_rom_eff` / `io_rom_eff` / `ram_sel_eff`
+and feeds them everywhere the pins went (HDMI gets the EFFECTIVE CPU_ROM_SEL, so framing follows). Saved in settings
+bits 64 (scanlines, now honoured on load) and 74-79 -- the last spare bits of the flags. Status grew to 13 bytes, the
+two new ones sent AFTER the temperature so older XIAO firmware still parses the reply; VERSION = 2. The override
+registers drive DOTCK/C16M logic combinationally exactly like the jumpers, so they are false-pathed by name
+(`get_cells -hierarchical -filter {NAME =~ *lnet_cfg_*_reg*}`): **verified by effect, all 1039 paths into non-pixel
+clocks report EXCEPTION = False Path.** INVID is active low at the pin (CPU_board gets `~INVID`), so "inverse on" =
+pin^override == 0 -- derived from the code, CHECK ON HARDWARE that the page's Inverse video matches the screen. XIAO 0.5
+shows the new controls only when the FPGA reports version 2. Gotcha: `.row{display:flex}` beat the `hidden` attribute
+(`#nosd` never hid); page.cpp now has `[hidden]{display:none!important}`.
+**Board state 2026-10-16 ~00:30 (current):** the 10-14 control-channel build is back IN FLASH (from the readback,
+`tools/esp32_wifi_test/backup/fpga_flash_10-14_control.{bin,mcs}`), cold-booted: saved alignment and USB soft-CPU host
+work again. ESFloppy runs our firmware with the OLED guard + floppy remote (committed in the ESFloppy repo as f3df891 /
+bc71bad on `lisanet`, not pushed; the remote is dormant on this build). ESProFile is back on its LisaNet firmware
+(`lisanet` branch HEAD 81f33f3, rebuilt and flashed 2026-10-16). ESFloppy card: `/hd` renamed back (done). XIAO back
+on J21. The MMCM-merge build (below) is still to be checked/flashed.
+**Board state at end of 2026-10-15 (superseded):** running CLEAN UPSTREAM -- v1.6 `top.mcs` in
+the config flash, Alex's ESFloppy and ESProFile firmware (from the 8 MB backups), XIAO unplugged; ESFloppy's card has
+`/hd` renamed `/.hd`, a pristine `/.LISANET/1000-miles-pristine.dc42`, `/LisaCalc.image`; the saved settings block at
+0xC00000 is untouched. Upstream v1.6 settles at 80-82 C with no fan; our builds ran 88-92 C (a fan on the heatsink gave
+60 C). A build was launched ~23:20 with: (1) the MMCM MERGE -- `hdmi_clock_divider_1024x768` now has 3 outputs
+(usbclk_fs 60.000 = 975/16.25 on CLKOUT0, the only fractional output, BUFG; clk_pixel_1024x768 65 = 975/15 and
+clk_pixel_x5_1024x768 325 = 975/3, No_buffer), exported from HDMI_Interface as `usbclk_fs`; the `usb_fs_clock` IP is no
+longer instantiated (4 MMCMs, ~0.12 W less; Vivado estimated our build at 1.53 W vs upstream ~1.18 W, the two extra MMCMs
+being ~0.23 W of it, the on-screen menu only ~0.01-0.02 W); the IP's OOC run had to be re-run before elaboration saw the
+new port; (2) the INVERSE VIDEO polarity fix (inverse on = pin ^ override == 1, from the user's test); (3) the FDC RAM
+C16M change. All uncommitted. Next: check that build's timing and the usbclk_fs clock/groups by effect, then (user's
+go-ahead) restore our setup -- flash it, ESFloppy/ESProFile LisaNet firmware, XIAO back on J21, `/.hd` -> `/hd` -- and
+measure the temperature. Floppy reads remain an open, probably HARDWARE, fault (see below); next test there is the
+user's spare ESFloppy on the EXT floppy connector.
+**FLOPPY PROBLEM SOLVED (2026-10-15): it was the DEAD OLED.** With the broken OLED UNPLUGGED, floppies read RELIABLY
+(repeated inserts, both images, Lisa reboots) on the same clean-upstream setup that failed ~3 times in 4 with it
+plugged in. Everything in the long bisect -- FPGA builds, JTAG vs flash, the FDC RAM timing, heat, CPU speed,
+ESProFile, our firmware -- was a red herring; the apparent patterns were chance. Mechanism below. A replacement OLED is
+on order. **OLED GUARD written and CONFIRMED on hardware (2026-10-16):** ESFloppy `lisanetOled.cpp` (lisanet branch,
+uncommitted, built together with the floppy-remote code): `lisanetOledGuardInit()` right after `Wire.begin()` sets a
+5 ms Wire timeout, probes 0x3C and installs a wrapper on u8g2's byte callback (`u8g2_GetU8x8(...)->byte_cb`), so EVERY
+OLED transfer is dropped if the display did not ACK at start-up or once any transfer takes > 5 ms (logged once). With
+the dead OLED plugged back in (wired correctly) it logged "OLED not answering ... (I2C result 2)" and floppies loaded
+fine. The display is genuinely dead (no ACK even wired right); the user saw its Dupont wires twisted when unplugging it,
+so SCL/SDA may have been swapped at some point -- unknown. Safe on upstream bitstreams too (they hold ESFLOPPY_COMM_BUS
+[5:3] = 0: MODE low, and the remote's link never starts). Still to do: suggest the guard to Alex (user's OK). The FDC RAM change (IO_RAM_444C_3 on C16M) is still a correct
+timing improvement and stays in, but it did NOT fix this.
+**The dead-OLED mechanism (was "strongest lead", now confirmed by unplugging):** ESFloppy drives the OLED over I2C (SDA 46 / SCL 2) from
+the SAME SD task that feeds tracks to the floppy core; `sendOneOLEDPage()` (uiHelpers.cpp) is called every loop and
+Alex's own comment says one page must stay ~3 ms or the SD task can't keep up with the Lisa. The status screen redraws
+"Track xx Side x" on every head step, so I2C traffic happens exactly during disk reads; a dead display that NACKs or
+holds the bus low could make each transfer wait for the Wire timeout -> late tracks -> read retries. The OLED died in
+the 10-04 overvoltage, and floppy was never tested between then and 10-11. Test firmware ready:
+`tools/esp32_wifi_test/backup/esfloppy_70cd08e_tracklog_oledprobe.ino.bin` (+ `.patch`, applies to ESFloppy 70cd08e):
+track log + probes I2C 0x3C at the first page send ("[oled] probe 0x3C: ..."), disables OLED updates if no ACK, logs any
+page > 5 ms. Flash with arduino-cli upload --input-dir or esptool at 0x10000 (bootloader/partitions copies alongside),
+then watch the console while LOS reads a disk. If it is the cause, the cure is that check in the real firmware (or
+replacing/removing the dead OLED).
+**UPDATE 2026-10-15 late (SUPERSEDED -- the cause was the dead OLED, see "FLOPPY PROBLEM SOLVED" above): the build theory below is WRONG -- floppy reads are flaky on this board even fully
+upstream.** With Alex's v1.6 `top.mcs` flashed (from `origin/main`, copies in `tools/esp32_wifi_test/backup/upstream_v1.6/`),
+Alex's ESFloppy 1.0 and ESProFile firmware restored from the 8 MB backups, the XIAO unplugged and a cold boot, LOS still
+says "not in the standard Lisa Office System format". It also fails for a second image (TOSEC LisaCalc, 400K DC42), at
+5 MHz, and at 60 C with a fan; ESFloppy has never saved settings (NVS has no `configStruct`), so it is in its default
+Sony-Lisa mode. Track-logging ESFloppy firmware (70cd08e + the commented-out debugPrint lines in SDTask.cpp re-enabled)
+showed LOS re-requesting the same tracks (e.g. 3,0,6,2 x3) and giving up = read RETRIES: ESFloppy delivers every track,
+the Lisa decodes garbage. Successes (~3 of ~12) are intermittent and earlier "patterns" (first boot after power-up,
+JTAG vs flash, ESProFile reset) were chance. Prime suspect: hardware damage from the 10-04 overvoltage (same event
+killed D5 and ESFloppy's OLED); floppy was never tested between 10-04 and 10-11 (no screen). Next: an external ESFloppy
+on the EXT floppy connector (FLOPPY SOURCE = EXT) to split onboard ESP32/traces from the FPGA side, or a GPIO
+self-test. The FDC RAM change (IO_RAM_444C_3 on C16M) is still a real timing improvement but did not cure this; it
+is uncommitted in the working tree. To restore our setup: flash a LisaNet bitstream, ESFloppy/ESProFile LisaNet
+firmware, plug the XIAO back, rename ESFloppy's `/.hd` to `/hd`.
+**FLOPPY READS DEPEND ON THE BUILD -- root cause found (2026-10-15), NOT FIXED YET.** (Superseded by the update above.) Symptom: LOS says "The micro
+diskette is not in the standard Lisa Office System format" (10-11: a disk named "I", hang on eject) for a good image.
+Bisected on hardware: same pristine `1000-miles.dc42` (SHA-256 `0c00f225...`, checksums verified), same ESFloppy
+firmware (`70cd08e`, whose drive code is byte-identical to Alex's), same settings -- the FLASHED 10-14 control-channel
+bitstream reads it fine (game copied off), the JTAG-loaded 10-15 build fails every time. The 10-14b/10-15 RTL changes are
+logically neutral for the floppy (I/O ROM override off, `io_rom_eff` == the switch), so it is placement. Cause, in
+upstream code: `IO_RAM_444C_3` (the FDC's shared RAM, 2 x 1024x4; every floppy sector byte passes through it) is
+written/read on `negedge _CS`, where `_CS` = `io_board/_FDC_RAM_CS_processed_reg` -- a fabric register used as a clock,
+on general routing, with the address (`RA` muxed between the 68K bus and the 6504's MA), data and R_W arriving through
+logic, and NO clock defined, so nothing is timed. check_timing: 217,721 no_clock pins, incl. 137 on
+`_FDC_RAM_CS_processed_reg` and 231 on `io_board/clock_divider_reg[1]` (C4M; C2M likewise -- divided in fabric, BUFG'd,
+never declared). "Timing met" therefore says nothing about the floppy path. Fix to make: run the RAM on C16M with an
+enable from the falling edge of the chip select (and constrain the 68K-bus -> C16M crossing deliberately), plus
+create_generated_clock for C4M/C2M; prove it by TIMING (paths constrained, positive slack), not by one lucky build.
+Until then: a build that reads floppies is the flashed 10-14 one. Bisect side notes: opening ESFloppy's USB console
+RESETS it (rst 0x15 USB_UART_CHIP_RESET) -- never (re)open it while the Lisa uses a disk; the LOS selector ejects the
+floppy when a hard disk is chosen (ESFloppy RESET re-inserts via mount-next); ESFloppy's card has `/hd` renamed to
+`/.hd` for the blind-SEL test (rename back).
+**XIAO FIRMWARE CHANGES: SHIP EVERY ONE AS A NEW, VERSIONED FILE FOR A WIRELESS UPDATE. The user updates the XIAO over
+WiFi only from now on -- do NOT flash it over USB (COM7) unless WiFi updating itself is broken.** For every change to
+`firmware/lisanet_wifi`:
+1. Bump `LISANET_WIFI_VERSION` in `config.h` (source is 0.2, but 0.3 and 0.3-crashtest were OTA TEST builds, so releases go 0.4 (wireless firmware updates), then 0.5...; never reuse a number -- the page tells versions
+   apart only by this string, and "Go back to x" names the previous one). Also rewrite `LISANET_WIFI_NOTES` (a few words on what the version brought; the card shows it in brackets after the version, with the flash slot app0/app1 only as a tooltip).
+2. Compile: `tools/toolchain/arduino-cli/arduino-cli.exe compile --fqbn esp32:esp32:XIAO_ESP32S3 --output-dir
+   firmware/lisanet_wifi/build firmware/lisanet_wifi`.
+3. Check the tag is in the image: `grep -ao "LISANET-WIFI-FW/[ -~]*" firmware/lisanet_wifi/build/lisanet_wifi.ino.bin`
+   must print `LISANET-WIFI-FW/<new version>` (the bare `LISANET-WIFI-FW/` line is the search string; ignore it).
+   Without it the board refuses the upload.
+4. Copy it to a fresh, versioned file for the user: `firmware/lisanet_wifi/build/releases/lisanet_wifi-<version>.ino.bin`
+   (build/ is git-ignored; the plain `lisanet_wifi.ino.bin` is overwritten by every compile, so the versioned copy is
+   the one to hand over). Give the user its full Windows path. NEVER hand over `.merged.bin` (refused: too big).
+5. The user installs it from lisanet.local -> Settings -> "WiFi board firmware" -> Install update. The new version
+   is on trial for 20 s; ask the user what the card shows afterwards before recording a result.
+6. Commit the source with the version bump (only when the user asks).
+Keep each change able to boot and bring up WiFi + the web server: a version that boots but breaks the page or WiFi is
+NOT rolled back automatically (only crashes in the first 20 s are). If the page still loads, its "Go back to x" button recovers; if it does not, only a USB flash does (the B button wipes the network and password, not the firmware).
 **XIAO firmware updates over WiFi (2026-10-14): WORK on hardware -- all four tests passed** (0.2 -> 0.3 over WiFi;
 a crash-test build rolled back to 0.3 by itself; manual "Go back to 0.2"; a .merged.bin refused). `ota.cpp`, the
 "WiFi board firmware" card on the Settings tab (which is now the FIRST tab; `#files` keeps Files across a reload),
