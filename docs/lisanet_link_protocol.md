@@ -76,6 +76,21 @@ fragmented. LIST pages: send `start_index` 0, then the
 returned `next_index` until it is 0xFFFF. MOUNT_NEXT stores an image in `/.LISANET/MOUNTNXT.TXT` (a dot folder, so the file picker hides it); ESFloppy
 mounts it in drive 1 (the Sony drive, or the lower Twiggy) **every** time it starts in FLOPPY mode, until cleared.
 
+## Floppy remote control (ESFloppy's drive firmware, NORMAL mode)
+
+In NORMAL mode the FPGA also connects the link to ESFloppy (FPGA builds from 2026-10-15), which is then still the
+Lisa's floppy drive. Its drive firmware (`lisanetDrive.cpp`, ESFloppy `lisanet` branch) starts its UART once the link
+line has idled high for 200 ms and answers ONLY these commands -- the SD server's commands get no reply, so the WiFi
+board still sees "no SD server" in NORMAL. They run in ESFloppy's SD task between track requests, exactly where its
+OLED file picker runs, so they work while the Lisa is on. Nothing here writes to the card. Same frames as above.
+
+| Cmd | Name | Request payload | Response payload (after status) |
+|---|---|---|---|
+| 0x50 | DRIVE_STATUS | — | `u8 version (1)`, `u8 emulMode` (0 Sony/Lisa, 1 Sony/Mac, 2 Twiggy), `u8 flags` (bit0 Twiggy, bit1 ESFloppy's own menu is open), then for drive 0 and drive 1: `u8 flags` (bit0 exists in this mode, bit1 inserted, bit2 eject pending), `u8 name_len`, path; then `u8 len`, firmware string. Sony mode has only drive 1. |
+| 0x51 | DRIVE_LIST | `u16 start_index`, path | as LIST, but only folders and the images this drive mode accepts (the OLED picker's filter: extension, hidden names, DC42 header or raw size) |
+| 0x52 | DRIVE_INSERT | `u8 drive`, path | — Status EXISTS (drive not empty, or ejecting), UI_BUSY (9: ESFloppy's own menu is open), BAD_IMAGE (10: not an image for this drive), IN_USE (11: in the other drive), NO_CONTIGUOUS, NOT_FOUND. The client must not retry it. |
+| 0x53 | DRIVE_EJECT | `u8 drive`, `u8 force` | — A Sony always force-ejects (it has no eject button; like a long SEL press). A Twiggy ejects normally (its eject button) unless `force`. NOT_FOUND if empty. |
+
 ## FPGA control frames
 
 The FPGA itself also listens on the WiFi board's link TX (J21 GPIO5), in every ESP32 mode, for frames addressed to it.
@@ -100,19 +115,26 @@ control frame only while it has no SD request outstanding, so the ESP32 is silen
 
 | Cmd | Name | Request payload | Reply payload (after status) |
 |---|---|---|---|
-| 0x01 | STATUS | — | `u8 version (1)`, 11-byte status block, `u16` XADC temperature code (degrees C = code x 503.975 / 65536 - 273.15) |
+| 0x01 | STATUS | — | `u8 version` (1, or 2 from 2026-10-14), status bytes 0-10, `u16` XADC temperature code (degrees C = code x 503.975 / 65536 - 273.15), then in version 2 status bytes 11-12 (placed last so older WiFi firmware still parses the reply) |
 | 0x02 | SET | `u8 reg`, `u16 value` | — |
-| 0x03 | ACTION | `u8 action`: 1 save settings, 2 press the Lisa's power button, 3 press reset (each press lasts 250 ms) | — |
+| 0x03 | ACTION | `u8 action`: 1 save settings, 2 press the Lisa's power button, 3 press reset, 4 press NMI (version 2) (each press lasts 250 ms) | — |
 
-Status: 0 OK, 1 BAD_REQUEST, 2 LOCKED (ESP32 mode while the Lisa is on), 3 BUSY (the FPGA did not take the write within
+Status: 0 OK, 1 BAD_REQUEST, 2 LOCKED (ESP32 mode, a ROM or the RAM size while the Lisa is on), 3 BUSY (the FPGA did not take the write within
 200 ms), 4 UNKNOWN_CMD.
 
 SET registers, applied on the next video frame with the on-screen menu's limits and locks: 1 resolution (0 1080p30,
 1 1080p60, 2 1024x768 where built), 2 H offset and 3 V offset of the live mode (clamped to its room), 4 max contrast
 (the effective setting; the jumper is folded in), 5 CPU speed (0 follow the switches, 1-4 = 5 / 10 / 15 / 18.75 MHz),
-6 ESP32 mode (0 NORMAL, 1 WIFI FDD, 2 WIFI HDD; only with the Lisa off). Like the menu, changes last until power-off
+6 ESP32 mode (0 NORMAL, 1 WIFI FDD, 2 WIFI HDD; only with the Lisa off). Version 2 adds 8 scanlines, 9 inverse video
+(0/1, the effective setting: the override is whatever makes the jumper read that way), 10 CPU ROM (0 H, 1 3A),
+11 I/O ROM (0 Sony/A8, 1 Twiggy/40), 12 RAM size (0 follow the jumpers, 1-4 = 512K / 1M / 1.5M / 2M); 10-12 only
+with the Lisa off. 7 is reserved (save is ACTION 1). Settings saved from the web keep these in bits 64 and 74-79 of
+the settings block. Like the menu, changes last until power-off
 unless saved.
 
 Status block (little-endian): 0 resolution; 1 flags (bit 0 max contrast, 1 Lisa on, 2 WiFi board present, 3 ESP32 WIFI,
 4 target HDD, 5 a saved block exists, 6 saving, 7 CPU speed chosen); 2 bits 0-1 CPU speed index, 2 1024x768 built in,
 3 resolution chosen, 4 3A ROM, 5 MAX CONTRAST jumper; 3-4 H offset, 5-6 H limit, 7-8 V offset, 9-10 V limit.
+Version 2: 11 bit 0 scanlines, 1 SCANLINES jumper, 2 inverse video, 3 INVERSE VIDEO jumper at INV, 4 3A CPU ROM (also
+in byte 2), 5 CPU ROM switch at 3A, 6 Twiggy I/O ROM, 7 I/O ROM switch at Twiggy; 12 bits 0-1 RAM size (0-3 =
+512K-2M), 2-3 the RAM SIZE jumpers, 4 RAM size set from the web. Effective values include the web's overrides.

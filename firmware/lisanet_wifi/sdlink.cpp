@@ -11,7 +11,7 @@ static size_t rxLen = 0;                     // payload length of the last respo
 static const uint8_t HANDLE = 1;
 
 static const char *const names[] = {"OK", "NOT_FOUND", "EXISTS", "IO", "BAD_REQUEST", "NO_HANDLE", "UNKNOWN_CMD",
-                                    "NO_CARD", "NO_CONTIGUOUS"};
+                                    "NO_CARD", "NO_CONTIGUOUS", "UI_BUSY", "BAD_IMAGE", "IN_USE"};
 const char *statusName(int s) {
     if (s == TIMEOUT) return "NO_RESPONSE (is ESP32 MODE set to WIFI?)";
     return (s >= 0 && s < (int)(sizeof names / sizeof names[0])) ? names[s] : "UNKNOWN";
@@ -74,7 +74,7 @@ static bool readResponse(uint8_t wantCmd, uint8_t wantSeq, uint32_t timeoutMs) {
 
 // One request with retries. On success the response payload (after the status byte) is at rx + 7, length rxLen - 1.
 static int call(uint8_t cmd, const uint8_t *a, size_t na, const uint8_t *b = nullptr, size_t nb = 0,
-                uint32_t timeoutMs = 1000) {
+                uint32_t timeoutMs = 1000, int attempts = 4) {
     if (!port) return TIMEOUT;
     seq++;
     uint8_t hdr[6] = {0xA5, 0x5A, cmd, seq, 0, 0};
@@ -84,7 +84,7 @@ static int call(uint8_t cmd, const uint8_t *a, size_t na, const uint8_t *b = nul
     if (nb) c = crcUpdate(c, b, nb);
     c ^= 0xFFFFFFFFu;
     uint8_t tail[4] = {(uint8_t)c, (uint8_t)(c >> 8), (uint8_t)(c >> 16), (uint8_t)(c >> 24)};
-    for (int attempt = 0; attempt < 4; attempt++) {
+    for (int attempt = 0; attempt < attempts; attempt++) {
         while (port->available()) port->read();
         port->write(hdr, 6);
         if (na) port->write(a, na);
@@ -114,12 +114,12 @@ int info(uint64_t &card, uint64_t &freeBytes) {
     return s;
 }
 
-int list(const String &path, void (*fn)(const Entry &, void *), void *ctx) {
+static int listCmd(uint8_t cmd, const String &path, void (*fn)(const Entry &, void *), void *ctx) {
     uint16_t start = 0;
     while (start != 0xFFFF) {
         uint8_t a[2];
         put16(a, start);
-        int s = call(0x10, a, 2, (const uint8_t *)path.c_str(), path.length(), 5000);
+        int s = call(cmd, a, 2, (const uint8_t *)path.c_str(), path.length(), 5000);
         if (s != OK) return s;
         const uint8_t *r = resp();
         size_t n = respLen(), o = 2;
@@ -229,6 +229,51 @@ int mountNextGet(String &path) {
     int s = call(0x41, nullptr, 0, nullptr, 0, 2000);
     if (s == OK) { char tmp[256]; size_t n = respLen() < 255 ? respLen() : 255; memcpy(tmp, resp(), n); tmp[n] = 0; path = tmp; }
     return s;
+}
+
+int list(const String &path, void (*fn)(const Entry &, void *), void *ctx) { return listCmd(0x10, path, fn, ctx); }
+
+// ---- Floppy remote control (ESFloppy's drive firmware, NORMAL mode) ----------------------------
+static String lenStr(const uint8_t *&p, const uint8_t *end) {
+    if (p >= end) return String();
+    uint8_t n = *p++;
+    if (p + n > end) n = end - p;
+    char tmp[256];
+    memcpy(tmp, p, n); tmp[n] = 0;
+    p += n;
+    return String(tmp);
+}
+
+int driveStatus(DriveStatus &s) {
+    // Short timeout, two tries: the page polls this, and firmware without the remote control never answers
+    int st = call(0x50, nullptr, 0, nullptr, 0, 300, 2);
+    if (st != OK) return st;
+    const uint8_t *p = resp(), *end = resp() + respLen();
+    if (respLen() < 3) return BAD_REQUEST;
+    s.emulMode = p[1];
+    s.twiggy = p[2] & 1;
+    s.uiBusy = p[2] & 2;
+    p += 3;
+    for (int d = 0; d < 2; d++) {
+        uint8_t f = p < end ? *p++ : 0;
+        s.drive[d].exists = f & 1;
+        s.drive[d].inserted = f & 2;
+        s.drive[d].ejecting = f & 4;
+        s.drive[d].name = lenStr(p, end);
+    }
+    s.firmware = lenStr(p, end);
+    return OK;
+}
+
+int driveList(const String &path, void (*fn)(const Entry &, void *), void *ctx) { return listCmd(0x51, path, fn, ctx); }
+
+int driveInsert(uint8_t drive, const String &path) {
+    return call(0x52, &drive, 1, (const uint8_t *)path.c_str(), path.length(), 5000, 1);
+}
+
+int driveEject(uint8_t drive, bool force) {
+    uint8_t a[2] = {drive, (uint8_t)(force ? 1 : 0)};
+    return call(0x53, a, 2, nullptr, 0, 1000, 1);
 }
 
 }  // namespace sdlink

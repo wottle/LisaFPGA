@@ -16,7 +16,7 @@ static const uint32_t KEEP_AFTER_MS = 20000;
 
 void begin();                          // logs the running slot; call early in setup()
 void poll();                           // marks a pending image good once it has proved itself; restarts when asked
-String infoJson();                     // {"version","slot","pending","canRollBack","prev"}
+String infoJson();                     // {"version","notes","slot","pending","canRollBack","prev"}
 
 // Upload, fed from the web server's raw-body callback
 bool start(size_t size);

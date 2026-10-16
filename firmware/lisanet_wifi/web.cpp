@@ -21,9 +21,16 @@
 //   POST /api/copystep              {"copied":bytes,"total":bytes}: up to 1 MB more; repeat until copied == total
 //   GET  /api/mountnext             {"path":"..."};   POST /api/mountnext?path=   (empty clears)
 //   GET  /api/fpga                  the FPGA's settings and state (fpgactl::Status as JSON)
-//   POST /api/fpga/set?reg=&value=  a setting (fpgactl::Reg); 409 if the Lisa is on and reg is the ESP32 mode
-//   POST /api/fpga/action?a=save|power|reset   save settings, or press the Lisa's power or reset button
-//   GET  /api/fw                    this board's firmware: {"version","slot","pending","canRollBack","prev"}
+//   POST /api/fpga/set?reg=&value=  a setting (fpgactl::Reg); 409 if the Lisa is on and reg is the ESP32 mode, a ROM
+//                                   or the RAM size
+//   POST /api/fpga/action?a=save|power|reset|nmi   save settings, or press the Lisa's power, reset or NMI button
+//   GET  /api/drive                 the floppy drive (ESFloppy's drive firmware, NORMAL mode): {"twiggy","uiBusy",
+//                                   "drives":[{"n","exists","inserted","ejecting","name"},..],"fw"}; 503 if it does not answer
+//   GET  /api/drive/ls?path=        folders and images that drive mode accepts, as /api/ls
+//   POST /api/drive/insert?drive=&path=   insert an image (409 drive full or ESFloppy's menu open, 415 not an image
+//                                   for this drive)
+//   POST /api/drive/eject?drive=&force=1  eject (a Sony always force-ejects)
+//   GET  /api/fw                    this board's firmware: {"version","notes","slot","pending","canRollBack","prev"}
 //   POST /api/fw/update             raw body: a new lisanet_wifi.ino.bin; installed into the other slot, then a restart
 //   POST /api/fw/rollback           go back to the previous firmware, then a restart
 // Errors are {"error":"..."} with 503 when ESFloppy can't be reached (ESP32 MODE not set to WIFI).
@@ -79,7 +86,8 @@ static String jsonEscape(const String &s) {
 }
 
 static void sendError(int s) {
-    int code = s == sdlink::TIMEOUT ? 503 : s == sdlink::NOT_FOUND ? 404 : s == sdlink::EXISTS ? 409
+    int code = s == sdlink::TIMEOUT ? 503 : s == sdlink::NOT_FOUND ? 404
+             : (s == sdlink::EXISTS || s == sdlink::UI_BUSY || s == sdlink::IN_USE) ? 409 : s == sdlink::BAD_IMAGE ? 415
              : s == sdlink::NO_CONTIGUOUS ? 507 : s == sdlink::BAD_REQUEST ? 400 : 500;
     server.send(code, "application/json", String("{\"error\":\"") + jsonEscape(sdlink::statusName(s)) + "\"}");
 }
@@ -388,33 +396,39 @@ static void handleMountNextSet() {
 static void sendFpgaResult(int s) {
     if (s == fpgactl::OK) { server.send(200, "application/json", "{}"); return; }
     int code = s == fpgactl::LOCKED ? 409 : s == fpgactl::BAD_REQUEST ? 400 : s == fpgactl::NO_REPLY ? 503 : 500;
-    const char *why = s == fpgactl::LOCKED ? "The Lisa is on: ESP32 mode can only change while it is off"
+    const char *why = s == fpgactl::LOCKED ? "The Lisa is on: the ESP32 mode, ROMs and RAM size can only change while it is off"
                     : s == fpgactl::NO_REPLY ? "The FPGA is not answering (it needs the control-channel build)"
                     : fpgactl::statusName(s);
     server.send(code, "application/json", String("{\"error\":\"") + why + "\"}");
 }
+
+static const char *B(bool b) { return b ? "true" : "false"; }
 
 static void handleFpgaStatus() {
     if (!authorized()) return;
     fpgactl::Status s;
     int st = fpgactl::status(s);
     if (st != fpgactl::OK) { sendFpgaResult(st); return; }
-    char o[400];
+    char o[700];
     snprintf(o, sizeof o,
              "{\"version\":%u,\"videoMode\":%u,\"has1024\":%s,\"modeUserSet\":%s,\"hOff\":%u,\"hLim\":%u,\"vOff\":%u,"
              "\"vLim\":%u,\"contrast\":%s,\"contrastJumper\":%s,\"speedUserSet\":%s,\"speedIdx\":%u,\"lisaOn\":%s,"
-             "\"espMode\":%u,\"saved\":%s,\"saving\":%s,\"rom3A\":%s,\"tempC\":%.1f}",
+             "\"espMode\":%u,\"saved\":%s,\"saving\":%s,\"rom3A\":%s,\"tempC\":%.1f,\"hasMachine\":%s,"
+             "\"scanlines\":%s,\"scanlinesJumper\":%s,\"inverse\":%s,\"inverseJumper\":%s,\"rom3ASwitch\":%s,"
+             "\"twiggy\":%s,\"twiggySwitch\":%s,\"ram\":%u,\"ramSwitch\":%u,\"ramUserSet\":%s}",
              s.version, s.videoMode, s.has1024 ? "true" : "false", s.modeUserSet ? "true" : "false", s.hOff, s.hLim,
              s.vOff, s.vLim, s.contrast ? "true" : "false", s.contrastJumper ? "true" : "false",
              s.speedUserSet ? "true" : "false", s.speedIdx, s.lisaOn ? "true" : "false", s.espMode,
-             s.saved ? "true" : "false", s.saving ? "true" : "false", s.rom3A ? "true" : "false", s.tempC);
+             s.saved ? "true" : "false", s.saving ? "true" : "false", s.rom3A ? "true" : "false", s.tempC,
+             B(s.hasMachine), B(s.scanlines), B(s.scanlinesJumper), B(s.inverse), B(s.inverseJumper), B(s.rom3ASwitch),
+             B(s.twiggy), B(s.twiggySwitch), s.ram, s.ramSwitch, B(s.ramUserSet));
     server.send(200, "application/json", o);
 }
 
 static void handleFpgaSet() {
     if (!authorized()) return;
     long reg = server.arg("reg").toInt(), value = server.arg("value").toInt();
-    if (reg < 1 || reg > 6 || value < 0 || value > 2047) { sendFpgaResult(fpgactl::BAD_REQUEST); return; }
+    if (reg < 1 || reg == 7 || reg > 12 || value < 0 || value > 2047) { sendFpgaResult(fpgactl::BAD_REQUEST); return; }
     int s = fpgactl::set((uint8_t)reg, (uint16_t)value);
     if (s == fpgactl::OK && reg == fpgactl::REG_ESPMODE) lastGood = 0;   // a different SD server (or none) now
     sendFpgaResult(s);
@@ -423,10 +437,54 @@ static void handleFpgaSet() {
 static void handleFpgaAction() {
     if (!authorized()) return;
     String a = server.arg("a");
-    uint8_t act = a == "save" ? fpgactl::ACT_SAVE : a == "power" ? fpgactl::ACT_POWER : a == "reset" ? fpgactl::ACT_RESET : 0;
+    uint8_t act = a == "save" ? fpgactl::ACT_SAVE : a == "power" ? fpgactl::ACT_POWER : a == "reset" ? fpgactl::ACT_RESET : a == "nmi" ? fpgactl::ACT_NMI : 0;
     if (!act) { sendFpgaResult(fpgactl::BAD_REQUEST); return; }
     Serial.printf("[web] FPGA action: %s\r\n", a.c_str());
     sendFpgaResult(fpgactl::action(act));
+}
+
+// ---- The floppy drive's remote control (ESFloppy's drive firmware, NORMAL mode) ---------------
+static void handleDriveStatus() {
+    if (!authorized()) return;
+    sdlink::DriveStatus s;
+    int st = sdlink::driveStatus(s);
+    if (st != sdlink::OK) { sendError(st); return; }
+    String o = String("{\"twiggy\":") + B(s.twiggy) + ",\"uiBusy\":" + B(s.uiBusy) + ",\"emulMode\":" + s.emulMode + ",\"drives\":[";
+    for (int d = 0; d < 2; d++) {
+        if (d) o += ",";
+        o += String("{\"n\":") + d + ",\"exists\":" + B(s.drive[d].exists) + ",\"inserted\":" + B(s.drive[d].inserted) +
+             ",\"ejecting\":" + B(s.drive[d].ejecting) + ",\"name\":\"" + jsonEscape(s.drive[d].name) + "\"}";
+    }
+    o += "],\"fw\":\"" + jsonEscape(s.firmware) + "\"}";
+    server.send(200, "application/json", o);
+}
+
+static void handleDriveLs() {
+    if (!authorized()) return;
+    String path = server.hasArg("path") ? server.arg("path") : "/";
+    String o = "{\"path\":\"" + jsonEscape(path) + "\",\"entries\":[";
+    int s = sdlink::driveList(path, listEntry, &o);
+    if (s != sdlink::OK) { sendError(s); return; }
+    o += "]}";
+    server.send(200, "application/json", o);
+}
+
+static void handleDriveInsert() {
+    if (!authorized()) return;
+    long d = server.arg("drive").toInt();
+    String path = server.arg("path");
+    if (d < 0 || d > 1 || !path.startsWith("/")) { sendError(sdlink::BAD_REQUEST); return; }
+    Serial.printf("[web] floppy remote: insert %s in drive %ld\r\n", path.c_str(), d);
+    sendStatus(sdlink::driveInsert((uint8_t)d, path));
+}
+
+static void handleDriveEject() {
+    if (!authorized()) return;
+    long d = server.arg("drive").toInt();
+    if (d < 0 || d > 1) { sendError(sdlink::BAD_REQUEST); return; }
+    bool force = server.arg("force") == "1";
+    Serial.printf("[web] floppy remote: %s eject of drive %ld\r\n", force ? "force" : "normal", d);
+    sendStatus(sdlink::driveEject((uint8_t)d, force));
 }
 
 // ---- This board's own firmware (ota.h) -------------------------------------------------------
@@ -493,6 +551,10 @@ void begin() {
     server.on("/api/fpga", HTTP_GET, handleFpgaStatus);
     server.on("/api/fpga/set", HTTP_POST, handleFpgaSet);
     server.on("/api/fpga/action", HTTP_POST, handleFpgaAction);
+    server.on("/api/drive", HTTP_GET, handleDriveStatus);
+    server.on("/api/drive/ls", HTTP_GET, handleDriveLs);
+    server.on("/api/drive/insert", HTTP_POST, handleDriveInsert);
+    server.on("/api/drive/eject", HTTP_POST, handleDriveEject);
     server.on("/api/fw", HTTP_GET, handleFwInfo);
     server.on("/api/fw/update", HTTP_POST, handleFwDone, handleFwBody);
     server.on("/api/fw/rollback", HTTP_POST, handleFwRollback);

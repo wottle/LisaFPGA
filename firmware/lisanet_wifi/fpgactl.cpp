@@ -104,6 +104,11 @@ int status(Status &s) {
     s.rom3A = g & 0x10;         s.contrastJumper = g & 0x20;
     s.hOff = rd16(p + 4); s.hLim = rd16(p + 6); s.vOff = rd16(p + 8); s.vLim = rd16(p + 10);
     s.tempC = (respLen >= 15) ? rd16(p + 12) * 503.975f / 65536.0f - 273.15f : NAN;
+    s.hasMachine = respLen >= 17;                           // two more status bytes after the temperature
+    uint8_t m = s.hasMachine ? p[14] : 0, r = s.hasMachine ? p[15] : 0;
+    s.scanlines = m & 0x01;  s.scanlinesJumper = m & 0x02;  s.inverse = m & 0x04;  s.inverseJumper = m & 0x08;
+    s.rom3ASwitch = m & 0x20;  s.twiggy = m & 0x40;  s.twiggySwitch = m & 0x80;  // m bit 4 is rom3A, as in g
+    s.ram = r & 0x03;  s.ramSwitch = (r >> 2) & 0x03;  s.ramUserSet = r & 0x10;
     return OK;
 }
 

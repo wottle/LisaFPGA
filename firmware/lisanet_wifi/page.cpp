@@ -6,7 +6,7 @@ extern const char PAGE[] = R"HTML(<!doctype html>
 <style>
 :root{--bg:#f4f1ea;--fg:#1d1b18;--mut:#6b665d;--line:#d8d2c4;--acc:#2f5d8a;--bad:#a33;--card:#fffdf8}
 @media (prefers-color-scheme:dark){:root{--bg:#181715;--fg:#ece8df;--mut:#9a9488;--line:#34312c;--acc:#7fa9d6;--bad:#e07b7b;--card:#211f1c}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,sans-serif}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,sans-serif}
 main{max-width:900px;margin:0 auto;padding:16px}h1{font-size:20px;margin:0 0 4px}
 .mut{color:var(--mut);font-size:13px}.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}
 button,.btn{font:inherit;padding:5px 10px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;cursor:pointer;text-decoration:none}
@@ -36,6 +36,11 @@ input[type=number]{width:80px}.warn{color:var(--bad);font-weight:600}
 <nav class="tabs"><button id="tabS" class="on">Settings</button><button id="tabF">Files</button></nav>
 <div id="msg"></div>
 <section id="tFiles" hidden>
+<div class="card" id="fOff" hidden><h3>Not available while the Lisa is on</h3>
+<p class="mut">The SD cards can only be managed while the Lisa is off. Shut it down (from LOS, or Press power button on the
+Settings tab), and this page comes back by itself. To change the floppy disk while the Lisa runs, use Floppy drive on
+the Settings tab.</p></div>
+<div id="fBody">
 <div class="mut sp"><span id="info">Card space</span> <button id="infob" class="mini" title="Recalculate card space">&#x21bb;</button></div>
 <div class="bar" id="nosd" hidden><span class="mut">Switch the board to:</span><button data-esp="1">Manage ESFloppy's card (WIFI FDD)</button><button data-esp="2">Manage ESProFile's card (WIFI HDD)</button></div>
 <div class="bar"><span class="crumb" id="crumb"></span></div>
@@ -53,12 +58,14 @@ input[type=number]{width:80px}.warn{color:var(--bad);font-weight:600}
 <table><thead><tr><th class="c"><input type="checkbox" id="all" title="Select all"></th><th>Name</th><th class="s">Size</th><th></th></tr></thead><tbody id="list"></tbody></table>
 <p class="mut" id="mnhelp">Disk images (.dc42, .image, .img) must be stored contiguously; uploads here always are. "Mount next" makes
 ESFloppy insert that image in drive 1 every time it starts in FLOPPY mode, until cleared.</p>
+</div>
 </section>
 <section id="tSet">
 <div class="card"><h3>Lisa</h3>
 <div class="row"><label class="k">Power</label><span id="sLisa">-</span></div>
 <div class="row"><label class="k">FPGA die</label><span id="sTemp">-</span></div>
-<div class="row"><button id="bPower">Press power button</button><button id="bReset" class="danger">Reset</button></div></div>
+<div class="row"><button id="bPower">Press power button</button><button id="bReset" class="danger">Reset</button><button id="bNmi" class="danger" hidden>NMI</button></div></div>
+<div class="card" id="dCard" hidden><h3>Floppy drive</h3><div id="dRows"></div><div class="mut" id="dNote"></div></div>
 <div class="card"><h3>ESP32 mode</h3>
 <div class="row"><div class="seg" id="sEsp"><button data-v="0">NORMAL</button><button data-v="1">WIFI FDD</button><button data-v="2">WIFI HDD</button></div></div>
 <div class="mut" id="sEspNote">NORMAL: both drives are drives. WIFI FDD / WIFI HDD: that drive's SD card is managed from the Files tab instead,
@@ -69,10 +76,18 @@ and that drive is offline meanwhile. It can only change while the Lisa is off.</
 <input type="number" id="sH" min="0"><button data-ax="2" data-d="1">&rsaquo;</button><button data-ax="2" data-d="8">&raquo;</button><span class="mut" id="sHl"></span></div>
 <div class="row"><label class="k">Vertical</label><button data-ax="3" data-d="-8">&laquo;</button><button data-ax="3" data-d="-1">&lsaquo;</button>
 <input type="number" id="sV" min="0"><button data-ax="3" data-d="1">&rsaquo;</button><button data-ax="3" data-d="8">&raquo;</button><span class="mut" id="sVl"></span></div>
-<div class="row"><label class="k" for="sCon">Max contrast</label><input type="checkbox" id="sCon"><span class="mut" id="sConJ"></span></div></div>
+<div class="row"><label class="k" for="sCon">Max contrast</label><input type="checkbox" id="sCon"><span class="mut" id="sConJ"></span></div>
+<div class="row mach" hidden><label class="k" for="sScan">Scanlines</label><input type="checkbox" id="sScan"><span class="mut" id="sScanJ"></span></div>
+<div class="row mach" hidden><label class="k" for="sInv">Inverse video</label><input type="checkbox" id="sInv"><span class="mut" id="sInvJ"></span></div></div>
 <div class="card"><h3>CPU speed</h3>
 <div class="row"><select id="sSpd"><option value="0">Follow the SPEED switches</option><option value="1">5 MHz</option><option value="2">10 MHz</option>
 <option value="3">15 MHz</option><option value="4">18.75 MHz</option></select></div></div>
+<div class="card mach" hidden><h3>Machine</h3>
+<div class="row"><label class="k">CPU ROM</label><div class="seg" id="sCpuRom"><button data-v="0">H</button><button data-v="1">3A</button></div><span class="mut" id="sCpuRomJ"></span></div>
+<div class="row"><label class="k">I/O ROM</label><div class="seg" id="sIoRom"><button data-v="0">Sony (A8)</button><button data-v="1">Twiggy (40)</button></div><span class="mut" id="sIoRomJ"></span></div>
+<div class="row"><label class="k" for="sRam">RAM</label><select id="sRam"><option value="0">Follow the RAM SIZE jumpers</option><option value="1">512 KB</option>
+<option value="2">1 MB</option><option value="3">1.5 MB</option><option value="4">2 MB</option></select><span class="mut" id="sRamJ"></span></div>
+<div class="mut" id="sMachNote">H ROMs work in every OS; 3A only in MacWorks. Use the Twiggy ROM only with a Twiggy drive. These can only change while the Lisa is off.</div></div>
 <div class="bar"><button id="bSave">Save settings</button><span class="mut" id="sSaved"></span></div>
 <p class="mut">Changes apply at once, as in the on-screen menu, and are kept across a power cycle only after Save settings.</p>
 <div class="card"><h3>WiFi board firmware</h3>
@@ -82,6 +97,8 @@ and that drive is offline meanwhile. It can only change while the Lisa is off.</
 <p class="mut">Choose <b>lisanet_wifi.ino.bin</b> from the firmware's build folder (not the .merged.bin). The board restarts into it.
 A new version has to run for 20 s before it is kept: if it crashes sooner, the board goes back to this one by itself.</p></div>
 </section>
+<dialog id="ddlg"><p><b>Insert a disk</b> <span class="mut" id="dfor"></span></p><div class="bar"><span class="crumb" id="dcrumb"></span></div>
+<div id="dlist" style="max-height:50vh;overflow:auto"></div><div class="bar"><button id="dcancel">Cancel</button></div></dialog>
 <dialog id="rdlg"><p><b>Keep this resolution?</b></p><p class="mut">If the display went blank, do nothing: it goes back in <span id="rsec">15</span> s.</p>
 <div class="bar"><button id="rkeep">Keep</button><button id="rrevert">Go back now</button></div></dialog>
 </main><script>
@@ -196,7 +213,7 @@ async function space(){const t=$('info'),b=$('infob');b.disabled=true;t.textCont
  b.disabled=false;}
 $('infob').onclick=space;
 // ---- Settings tab: the FPGA's own settings, through the WiFi board's control channel (/api/fpga) ----
-let fst=null,fpoll=null;const ESPNOTE=$('sEspNote').textContent;
+let fst=null,fpoll=null;const ESPNOTE=$('sEspNote').textContent,MACHNOTE=$('sMachNote').textContent;
 async function fpga(url,opt){const r=await fetch(url,opt);let j={};try{j=await r.json()}catch(e){}
  if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j;}
 async function fset(reg,v){await fpga('/api/fpga/set?reg='+reg+'&value='+v,{method:'POST'});await frefresh();}
@@ -215,15 +232,34 @@ function render(s){
  document.querySelectorAll('[data-ax="3"],#sV').forEach(e=>e.disabled=!vroom);
  $('sCon').checked=s.contrast;$('sConJ').textContent=s.contrastJumper?'(the MAX CONTRAST jumper is on; this flips it)':'';
  if(document.activeElement!==$('sSpd'))$('sSpd').value=s.speedUserSet?s.speedIdx+1:0;
- $('sSaved').textContent=s.saving?'Saving...':s.saved?'Saved settings are in flash.':'Nothing saved yet: defaults at power-up.';}
-async function frefresh(){try{const s=await fpga('/api/fpga');fst=s;render(s);}catch(e){msg(e.message,1);}}
+ $('sSaved').textContent=s.saving?'Saving...':s.saved?'Saved settings are in flash.':'Nothing saved yet: defaults at power-up.';
+ // Jumper/switch overrides and NMI: only with an FPGA build that reports them (control version 2)
+ const m=!!s.hasMachine;document.querySelectorAll('.mach').forEach(e=>e.hidden=!m);$('bNmi').hidden=!m;if(!m)return;
+ const note=(eff,sw,what)=>'('+what+(eff!==sw?'; overridden here':'')+')';
+ $('sScan').checked=s.scanlines;$('sScanJ').textContent=note(s.scanlines,s.scanlinesJumper,'jumper '+(s.scanlinesJumper?'ON':'OFF'));
+ $('sInv').checked=s.inverse;$('sInvJ').textContent=note(s.inverse,s.inverseJumper,'jumper at '+(s.inverseJumper?'INV':'REG'));
+ const seg=(id,v)=>document.querySelectorAll('#'+id+' button').forEach(b=>{b.className=(+b.dataset.v===v)?'on':'';b.disabled=s.lisaOn;});
+ seg('sCpuRom',s.rom3A?1:0);$('sCpuRomJ').textContent=note(s.rom3A,s.rom3ASwitch,'switch at '+(s.rom3ASwitch?'3A':'H'));
+ seg('sIoRom',s.twiggy?1:0);$('sIoRomJ').textContent=note(s.twiggy,s.twiggySwitch,'switch at '+(s.twiggySwitch?'Twiggy':'Sony'));
+ const RAM=['512 KB','1 MB','1.5 MB','2 MB'],r=$('sRam');r.disabled=s.lisaOn;
+ if(document.activeElement!==r)r.value=s.ramUserSet?s.ram+1:0;
+ $('sRamJ').textContent='(jumpers: '+RAM[s.ramSwitch]+(s.ramUserSet?'; '+RAM[s.ram]+' set here':'')+')';
+ $('sMachNote').style.color=s.lisaOn?'var(--bad)':'';
+ $('sMachNote').textContent=s.lisaOn?'Locked while the Lisa is on. Shut it down first.':MACHNOTE;}
+async function frefresh(){try{const s=await fpga('/api/fpga');fst=s;render(s);}catch(e){msg(e.message,1);}drefresh();}
 // Settings is the first tab; #files in the address keeps the Files tab across a reload. Card space (a slow FAT scan
 // on ESFloppy) is read the first time Files is shown.
-let spaced=false;
+// While the Lisa is on, the Files tab shows only a notice; it checks every 3 s and loads the list once the Lisa is off.
+// An FPGA without the control channel (no answer) counts as off, so the tab works as before there.
+let spaced=false,filesLisaOn=null;
+async function filesCheck(first){let on=false;try{on=!!(await fpga('/api/fpga')).lisaOn}catch(e){}
+ if($('tFiles').hidden||(on===filesLisaOn&&!first))return;filesLisaOn=on;$('fOff').hidden=!on;$('fBody').hidden=on;
+ if(on){msg('');return;}
+ if(!spaced){spaced=true;load().then(space);}else load();}
 function showTab(set){$('tabF').className=set?'':'on';$('tabS').className=set?'on':'';$('tFiles').hidden=set;$('tSet').hidden=!set;msg('');
  try{history.replaceState(null,'',location.pathname+(set?'':'#files'))}catch(e){}
  clearInterval(fpoll);if(set){frefresh();fwInfo();fpoll=setInterval(frefresh,3000);}
- else if(!spaced){spaced=true;load().then(space);}else load();}
+ else{filesCheck(true);fpoll=setInterval(()=>filesCheck(false),3000);}}
 $('tabF').onclick=()=>showTab(false);$('tabS').onclick=()=>showTab(true);
 // ESP32 mode, from the Settings tab or the Files tab's shortcut buttons. The chosen ESP32 restarts as the SD server.
 async function espMode(v){await fdo(async()=>{await fset(6,v);
@@ -243,6 +279,13 @@ $('sH').onchange=()=>fdo(()=>fset(2,Math.max(0,+$('sH').value||0)));
 $('sV').onchange=()=>fdo(()=>fset(3,Math.max(0,+$('sV').value||0)));
 $('sCon').onchange=()=>fdo(()=>fset(4,$('sCon').checked?1:0));
 $('sSpd').onchange=()=>fdo(()=>fset(5,+$('sSpd').value));
+$('sScan').onchange=()=>fdo(()=>fset(8,$('sScan').checked?1:0));
+$('sInv').onchange=()=>fdo(()=>fset(9,$('sInv').checked?1:0));
+document.querySelectorAll('#sCpuRom button').forEach(b=>b.onclick=()=>fdo(()=>fset(10,+b.dataset.v)));
+document.querySelectorAll('#sIoRom button').forEach(b=>b.onclick=()=>fdo(()=>fset(11,+b.dataset.v)));
+$('sRam').onchange=()=>fdo(()=>fset(12,+$('sRam').value));
+$('bNmi').onclick=()=>{if(confirm('Press the NMI button? As with the real one, what happens depends on what the Lisa is running, and it may crash.'))
+  fdo(async()=>{await fpga('/api/fpga/action?a=nmi',{method:'POST'});msg('NMI pressed.');});};
 $('bSave').onclick=()=>fdo(async()=>{await fpga('/api/fpga/action?a=save',{method:'POST'});await frefresh();msg('Settings saved to flash.');});
 $('bPower').onclick=()=>{const on=fst&&fst.lisaOn;
  if(confirm(on?'Press the Lisa’s power button? LOS will be asked to shut down, as with the real button.':'Press the Lisa’s power button to turn it on?'))
@@ -251,7 +294,7 @@ $('bReset').onclick=()=>{if(confirm('Reset the Lisa? This is a hard stop, like t
   fdo(async()=>{await fpga('/api/fpga/action?a=reset',{method:'POST'});msg('Reset pressed.');});};
 // ---- This board's firmware: upload to the other slot, restart, wait for it to come back ----
 async function fwInfo(){try{const f=await fpga('/api/fw');
- $('fwRun').textContent=f.version+' ('+f.slot+(f.pending?', on trial: kept after 20 s':'')+')';
+ const r=$('fwRun');r.textContent=f.version+(f.notes?' ('+f.notes+')':'')+(f.pending?' -- on trial: kept after 20 s':'');r.title='Running from flash slot '+f.slot;
  const b=$('fwBack');b.hidden=!f.canRollBack;b.textContent='Go back to '+(f.prev||'the previous version');return f;}
  catch(e){$('fwRun').textContent='-';return null;}}
 function fwBack(note){$('fwT').textContent=note+' Waiting for the board to come back...';let n=0;
@@ -270,6 +313,52 @@ $('fwFile').onchange=e=>{const f=e.target.files[0];e.target.value='';if(!f)retur
  x.onerror=()=>{$('fwProg').hidden=true;$('fwT').textContent='';msg('Upload failed',1);};x.send(f);};
 $('fwBack').onclick=()=>{if(!confirm($('fwBack').textContent+'? The board restarts.'))return;
  fdo(async()=>{await fpga('/api/fw/rollback',{method:'POST'});fwBack('Going back.');});};
+// ---- Floppy drive remote control: ESFloppy's drive firmware answers in NORMAL mode, Lisa on or off ----
+// Older ESFloppy firmware never answers; then only try again every 30 s, so the WiFi board isn't kept waiting.
+let dRetryAt=0,dBusy=false;
+async function drefresh(){const c=$('dCard');
+ if(!fst||fst.espMode!==0||Date.now()<dRetryAt||dBusy){if(!fst||fst.espMode!==0)c.hidden=true;return;}
+ dBusy=true;try{const r=await fetch('/api/drive');if(!r.ok)throw 0;drender(await r.json());c.hidden=false;dRetryAt=0;}
+ catch(e){c.hidden=true;dRetryAt=Date.now()+30000;}dBusy=false;}
+const base=p=>p.replace(/^.*\//,'');
+function drender(d){const rows=$('dRows');rows.innerHTML='';
+ for(const v of d.drives){if(!v.exists)continue;const row=document.createElement('div');row.className='row';
+  const k=document.createElement('label');k.className='k';k.textContent=d.twiggy?(v.n===0?'Upper drive':'Lower drive'):'Drive';
+  const t=document.createElement('span');t.textContent=v.ejecting?'Ejecting...':v.inserted?base(v.name):'Empty';if(v.inserted)t.title=v.name;
+  row.append(k,t);
+  if(v.inserted&&!v.ejecting){
+   if(d.twiggy){const b=document.createElement('button');b.textContent='Eject';b.title='Like pressing the drive\'s eject button: the Lisa ejects the disk when it is ready';
+    b.onclick=()=>deject(v,false);row.append(b);}
+   const f=document.createElement('button');f.className='danger';f.textContent=d.twiggy?'Force eject':'Eject';f.onclick=()=>deject(v,true);row.append(f);}
+  else if(!v.inserted&&!v.ejecting){const b=document.createElement('button');b.textContent='Insert disk...';b.disabled=d.uiBusy;b.onclick=()=>dpick(v.n,d.twiggy);row.append(b);}
+  rows.append(row);}
+ $('dNote').textContent=d.uiBusy?'ESFloppy\'s own menu is open on its screen; close it to insert a disk from here.':
+  'Eject from LOS when you can; the eject here is like pulling the disk out of the drive.';}
+function deject(v,force){
+ if(force&&!confirm('Force-eject '+base(v.name)+'? This is like pulling the disk out of the drive: if the Lisa is using it, unsaved changes are lost and the disk may need repairing. Eject it from LOS instead when you can.'))return;
+ fdo(async()=>{await fpga('/api/drive/eject?drive='+v.n+'&force='+(force?1:0),{method:'POST'});msg(force?'Ejected.':'Eject requested: the Lisa ejects the disk when it is ready.');dRetryAt=0;await drefresh();});}
+let dDrive=1,dCwd='/';
+function dpick(n,twiggy){dDrive=n;$('dfor').textContent=twiggy?(n===0?'into the upper drive':'into the lower drive'):'';const g=$('ddlg');g.showModal();dgo('/');}
+$('dcancel').onclick=()=>$('ddlg').close();
+async function dgo(p){dCwd=p;const l=$('dlist'),c=$('dcrumb');l.innerHTML='<div class=mut>Loading (checking each image takes a moment)...</div>';c.innerHTML='';
+ const parts=p.split('/').filter(Boolean);const add=(t,q)=>{const a=document.createElement('a');a.href='#';a.textContent=t;a.onclick=e=>{e.preventDefault();dgo(q)};c.append(a)};
+ add('SD card','/');let q='';for(const x of parts){q+='/'+x;c.append(' / ');add(x,q);}
+ try{const r=await fpga('/api/drive/ls?path='+encodeURIComponent(p));l.innerHTML='';
+  const es=r.entries.sort((a,b)=>(b.d-a.d)||a.n.localeCompare(b.n));
+  if(p!=='/')es.unshift({n:'..',d:1,up:1});
+  for(const e of es){const row=document.createElement('div');row.className='row';const full=e.up?(p.replace(/\/[^/]*$/,'')||'/'):join(p,e.n);
+   if(e.d){const a=document.createElement('a');a.href='#';a.className='dir';a.textContent=e.n+(e.up?'':'/');a.onclick=ev=>{ev.preventDefault();dgo(full)};row.append(a);}
+   else{const b=document.createElement('button');b.textContent='Insert';b.onclick=()=>dinsert(full);const s=document.createElement('span');s.textContent=e.n;
+    const z=document.createElement('span');z.className='mut';z.textContent=size(e.s);row.append(b,s,z);}
+   l.append(row);}
+  if(!es.length)l.innerHTML='<div class=mut>No folders or disk images this drive can use here.</div>';
+ }catch(e){l.innerHTML='';l.textContent=e.message;}}
+async function dinsert(path){$('ddlg').close();
+ await fdo(async()=>{try{await fpga('/api/drive/insert?drive='+dDrive+'&path='+encodeURIComponent(path),{method:'POST'});}
+  catch(e){throw new Error(/UI_BUSY/.test(e.message)?'ESFloppy\'s own menu is open; close it and try again.':/EXISTS/.test(e.message)?'That drive already has a disk.':
+   /IN_USE/.test(e.message)?'That image is already in the other drive.':/BAD_IMAGE/.test(e.message)?'That image can\'t be used in this drive.':
+   /NO_CONTIGUOUS/.test(e.message)?'That image is fragmented on the card. Re-upload it from the Files tab (uploads are always contiguous).':e.message);}
+  msg('Inserted '+base(path)+'.');dRetryAt=0;await drefresh();});}
 showTab(location.hash!=='#files');
 </script></body></html>
 )HTML";

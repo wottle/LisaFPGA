@@ -69,7 +69,7 @@ String infoJson() {
     const esp_partition_t *run = esp_ota_get_running_partition();
     String prev = nvs.getString("prevver", "");
     bool can = Update.canRollBack();
-    String j = "{\"version\":\"" LISANET_WIFI_VERSION "\",\"slot\":\"";
+    String j = "{\"version\":\"" LISANET_WIFI_VERSION "\",\"notes\":\"" LISANET_WIFI_NOTES "\",\"slot\":\"";
     j += run ? run->label : "?";
     j += "\",\"pending\":";
     j += pendingVerify() ? "true" : "false";

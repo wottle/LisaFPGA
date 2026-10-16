@@ -20,7 +20,11 @@
 #pragma once
 
 #ifndef LISANET_WIFI_VERSION         // a test build can override it with -D
-#define LISANET_WIFI_VERSION "0.2"
+#define LISANET_WIFI_VERSION "0.7"
+#endif
+// What this version brought, shown next to the version on the web page. Rewrite it with every new version.
+#ifndef LISANET_WIFI_NOTES
+#define LISANET_WIFI_NOTES   "floppy drive remote control"
 #endif
 
 #define LISA_RX_PIN   1        // D0

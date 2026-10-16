@@ -6,6 +6,8 @@ namespace sdlink {
 
 enum Status : int {
     OK = 0, NOT_FOUND, EXISTS, IO, BAD_REQUEST, NO_HANDLE, UNKNOWN_CMD, NO_CARD, NO_CONTIGUOUS,
+    UI_BUSY, BAD_IMAGE, IN_USE,  // floppy remote control: ESFloppy's own menu is open / not an image for this drive /
+                                 // already in the other drive
     TIMEOUT = -1               // no valid response (ESFloppy not in WIFI mode, or not connected)
 };
 const char *statusName(int s);
@@ -40,5 +42,14 @@ int copyReplace(const String &from, const String &to, const String &backup, uint
 int copyStep(uint64_t &copied, uint64_t &total);
 int mountNextSet(const String &path);                      // empty path clears it
 int mountNextGet(String &path);
+
+// Floppy remote control (NORMAL mode): ESFloppy's DRIVE firmware, not the SD server, answers these, so they work while
+// the Lisa is running. See docs/lisanet_link_protocol.md, "Floppy remote control".
+struct DriveInfo { bool exists, inserted, ejecting; String name; };
+struct DriveStatus { uint8_t emulMode; bool twiggy, uiBusy; DriveInfo drive[2]; String firmware; };
+int driveStatus(DriveStatus &s);
+int driveList(const String &path, void (*fn)(const Entry &, void *), void *ctx);   // folders + images this drive takes
+int driveInsert(uint8_t drive, const String &path);   // not retried: a lost reply must not turn into "drive full"
+int driveEject(uint8_t drive, bool force);
 
 }  // namespace sdlink
