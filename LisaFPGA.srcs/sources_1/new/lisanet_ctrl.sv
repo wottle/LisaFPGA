@@ -14,13 +14,17 @@
 // after that line has been idle for REPLY_GUARD clocks; the WiFi board only sends a control frame while it has no SD
 // request outstanding, so the ESP32 is silent.
 //
-// Commands:  0x01 STATUS                       -> status, version, HDMI_Interface's 11-byte status block, then the
-//                                                 die temperature: the XADC's raw 16-bit code (12-bit result in
-//                                                 bits 15:4; degrees C = code * 503.975 / 65536 - 273.15)
+// Commands:  0x01 STATUS                       -> status, version, bytes 0-10 of HDMI_Interface's status block, the
+//                                                 die temperature (the XADC's raw 16-bit code, 12-bit result in
+//                                                 bits 15:4; degrees C = code * 503.975 / 65536 - 273.15), then
+//                                                 status bytes 11-12 (version 2 and later)
 //            0x02 SET    u8 reg, u16 value     -> status. reg 1 video mode, 2 H offset, 3 V offset (the live mode's),
-//                                                 4 max contrast, 5 CPU speed (0 = switches, 1-4), 6 ESP32 mode (0-2)
-//            0x03 ACTION u8 action             -> status. 1 save settings, 2 press the power button, 3 press reset
-// Status: 0 OK, 1 BAD_REQUEST, 2 LOCKED (ESP32 mode while the Lisa is on), 3 TIMEOUT, 4 UNKNOWN_CMD.
+//                                                 4 max contrast, 5 CPU speed (0 = switches, 1-4), 6 ESP32 mode (0-2),
+//                                                 8 scanlines, 9 inverse video, 10 CPU ROM (0 H, 1 3A), 11 I/O ROM
+//                                                 (0 Sony, 1 Twiggy), 12 RAM size (0 = switches, 1-4 = 512K-2MB)
+//            0x03 ACTION u8 action             -> status. 1 save settings, 2 press the power button, 3 press reset,
+//                                                 4 press NMI
+// Status: 0 OK, 1 BAD_REQUEST, 2 LOCKED (regs 6 and 10-12 while the Lisa is on), 3 TIMEOUT, 4 UNKNOWN_CMD.
 //
 // Settings live in HDMI_Interface (clk_pixel domain), which applies a write on its next frame tick with the same
 // limits and locks as the on-screen menu. web_req is {toggle, reg[3:0], value[10:0]}: the data is set, then the
@@ -32,13 +36,14 @@ module lisanet_ctrl (
     input  logic        sd_tx_pin,    // the serving ESP32's TX toward the WiFi board, or 1 when none (asynchronous)
     output logic        tx,           // to J21 GPIO4 while tx_en
     output logic        tx_en = 1'b0,
-    input  logic [87:0] status_in,    // from HDMI_Interface, clk_pixel domain; sampled twice and compared
+    input  logic [103:0] status_in,   // from HDMI_Interface, clk_pixel domain; sampled twice and compared
     output logic [15:0] web_req = 16'd0,
     input  logic        web_ack,      // clk_pixel domain toggle
     output logic        pwr_press = 1'b0,   // level, ~250 ms: a virtual press of the Lisa's power button
-    output logic        rst_press = 1'b0    // level, ~250 ms: a virtual press of the reset button
+    output logic        rst_press = 1'b0,   // level, ~250 ms: a virtual press of the reset button
+    output logic        nmi_press = 1'b0    // level, ~250 ms: a virtual press of the NMI button
 );
-    localparam logic [7:0] VERSION     = 8'd1;
+    localparam logic [7:0] VERSION     = 8'd2;   // 2: status bytes 11-12, SET regs 8-12, ACTION 4
     localparam int         REPLY_GUARD = 2500;        // 20 us = 40 bit times of idle on the ESP32's TX first
     localparam int         BYTE_GAP    = 12500;       // 100 us without a byte abandons a half-received frame
     localparam int         ACK_TIMEOUT = 25_000_000;  // 200 ms for HDMI_Interface to take a write (frames are <= 34 ms)
@@ -141,7 +146,7 @@ module lisanet_ctrl (
     end
 
     // ---- Status snapshot and the write handshake ---------------------------------------------------------------
-    logic [87:0] status_q = 88'd0;
+    logic [103:0] status_q = 104'd0;
     (* ASYNC_REG = "TRUE" *) logic ack_int = 1'b0, ack_s = 1'b0;
     always_ff @(posedge clk) begin
         status_q <= status_in;       // bounded by the clock-level set_max_delay; compared twice before use
@@ -165,14 +170,14 @@ module lisanet_ctrl (
     logic [31:0] crc = 32'hFFFFFFFF;
     logic [7:0]  cbyte = 8'd0;
     logic [3:0]  cbits = 4'd0;      // CRC bits still to process for cbyte
-    logic [87:0] snap = 88'd0;
+    logic [103:0] snap = 104'd0;
     logic [5:0]  snap_wait = 6'd0;
     logic [24:0] wait_cnt = 25'd0;
     logic [7:0]  status = 8'd0;
     // The response: C3 3C 96 69, cmd|80, seq, len, payload (status + up to 15 bytes), CRC-32
-    logic [7:0]  rbuf [0:25];
+    logic [7:0]  rbuf [0:27];
     logic [4:0]  rlen = 5'd0, ridx = 5'd0;    // rlen = bytes from cmd|80 through the payload
-    logic [24:0] pwr_cnt = 25'd0, rst_cnt = 25'd0;
+    logic [24:0] pwr_cnt = 25'd0, rst_cnt = 25'd0, nmi_cnt = 25'd0;
     logic [11:0] guard = 12'd0;
 
 
@@ -193,8 +198,10 @@ module lisanet_ctrl (
         // Virtual button presses
         if (pwr_cnt != 25'd0) pwr_cnt <= pwr_cnt - 1'b1;
         if (rst_cnt != 25'd0) rst_cnt <= rst_cnt - 1'b1;
+        if (nmi_cnt != 25'd0) nmi_cnt <= nmi_cnt - 1'b1;
         pwr_press <= (pwr_cnt != 25'd0);
         rst_press <= (rst_cnt != 25'd0);
+        nmi_press <= (nmi_cnt != 25'd0);
 
         // A half-received frame is abandoned after BYTE_GAP clocks without a byte
         if (ps >= P_S1 && ps <= P_CRC) begin
@@ -246,8 +253,8 @@ module lisanet_ctrl (
                     ps <= X_RESPOND;
                     case (cmd)
                         8'h01: ;                                                    // STATUS: just the block
-                        8'h02: if (len != 8'd3 || pay[0] == 8'd0 || pay[0] > 8'd6) status <= 8'd1;
-                               else if (pay[0] == 8'd6 && lisa_on_snap) status <= 8'd2;
+                        8'h02: if (len != 8'd3 || pay[0] == 8'd0 || pay[0] == 8'd7 || pay[0] > 8'd12) status <= 8'd1;
+                               else if ((pay[0] == 8'd6 || pay[0] >= 8'd10) && lisa_on_snap) status <= 8'd2;
                                else begin
                                    web_req  <= {~web_req[15], pay[0][3:0], pay[2][2:0], pay[1]};
                                    wait_cnt <= 25'd0;
@@ -262,6 +269,7 @@ module lisanet_ctrl (
                                        end
                                    8'd2: pwr_cnt <= PRESS_TIME[24:0];
                                    8'd3: rst_cnt <= PRESS_TIME[24:0];
+                                   8'd4: nmi_cnt <= PRESS_TIME[24:0];
                                    default: status <= 8'd1;
                                endcase
                         default: status <= 8'd4;
@@ -275,12 +283,14 @@ module lisanet_ctrl (
                     rbuf[4] <= cmd | 8'h80; rbuf[5] <= seq; rbuf[7] <= status;
                     if (cmd == 8'h01 && status == 8'd0) begin
                         // status, version, the 11 bytes from HDMI_Interface, the temperature
-                        rbuf[6] <= 8'd15;
+                        rbuf[6] <= 8'd17;
                         rbuf[8] <= VERSION;
                         for (int i = 0; i < 11; i++) rbuf[9 + i] <= snap[8*i +: 8];
                         rbuf[20] <= temp_raw[7:0];
                         rbuf[21] <= temp_raw[15:8];
-                        rlen <= 5'd18;
+                        rbuf[22] <= snap[95:88];                    // status bytes 11-12 (v2)
+                        rbuf[23] <= snap[103:96];
+                        rlen <= 5'd20;
                     end else begin
                         rbuf[6] <= 8'd1;
                         rlen <= 5'd4;

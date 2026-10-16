@@ -345,18 +345,22 @@ module IO_board(
     end
 
     IO_RAM_444C_3 low_FDC_RAM(
+        .clk(C16M),
         .A(RA),
         .spoof_88(spoof_88), // Make the RAM always return ROM revision 88 if spoof_88 is set
         ._CS(_FDC_RAM_CS_processed),
+        ._CS_next(_FDC_RAM_CS_muxed), // the edge _CS falls on: the RAM acts on that C16M edge (see IO_RAM_444C_3)
         .R_W(RW_FDC_RAM),
         .D_in(RD_in[3:0]), // We'll talk about this in a second
         .D_out(RD_out[3:0])
     );
 
     IO_RAM_444C_3 high_FDC_RAM(
+        .clk(C16M),
         .A(RA),
         .spoof_88(spoof_88),
         ._CS(_FDC_RAM_CS_processed),
+        ._CS_next(_FDC_RAM_CS_muxed), // the edge _CS falls on: the RAM acts on that C16M edge (see IO_RAM_444C_3)
         .R_W(RW_FDC_RAM),
         .D_in(RD_in[7:4]), // Same here
         .D_out(RD_out[7:4])

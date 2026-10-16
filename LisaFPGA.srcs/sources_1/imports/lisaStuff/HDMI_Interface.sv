@@ -56,11 +56,21 @@ module HDMI_Interface #(
     // The WiFi board's settings writes, from lisanet_ctrl (sysclk domain): {toggle, reg[3:0], value[10:0]}, data held
     // until web_ack follows the toggle. Applied on a frame tick with the same limits and locks as the menu. reg: 1 video
     // mode, 2 H offset, 3 V offset (the live mode's), 4 max contrast, 5 CPU speed (0 = switches, 1-4), 6 ESP32 mode,
-    // 7 save settings.
+    // 7 save settings, 8 scanlines, 9 inverse video, 10 CPU ROM (0 H, 1 3A), 11 I/O ROM (0 Sony/A8, 1 Twiggy/40),
+    // 12 RAM size (0 = switches, 1-4 = 512K-2MB). 10-12 only while the Lisa is off.
     input  logic [15:0] web_req,
     output logic        web_ack,
-    // The settings and state the WiFi board reads back, 11 bytes, registered; see the packing where it is built
-    output logic [87:0] ctrl_status = 88'd0,
+    // The settings and state the WiFi board reads back, 13 bytes, registered; see the packing where it is built
+    output logic [103:0] ctrl_status = 104'd0,
+    // Web-only overrides of machine jumpers/switches. cfg_pins are the raw pins {RAM_SEL[1:0], IO_ROM_SEL, CPU_ROM_SEL,
+    // INVID}; cfg_ovr is {ram_user_set, ram_idx[1:0], io_rom_ovr, cpu_rom_ovr, invid_ovr}: top.sv XORs the three
+    // toggles onto their pins and uses ram_idx in place of RAM_SEL when ram_user_set. Quasi-static: they change only on
+    // a web write or a settings load, and the ROM/RAM ones only with the Lisa off, so the XDC false-paths them
+    // (cells named lnet_cfg_*). CPU_ROM_SEL above is the EFFECTIVE value (pin ^ override), from top.sv.
+    input  logic [4:0]  cfg_pins,
+    output logic [5:0]  cfg_ovr,
+    // The USB host's 60.000MHz clock, made by the 1024x768 MMCM below (it replaced the separate usb_fs_clock MMCM)
+    output logic        usbclk_fs,
 
     // ESFloppy control buttons, active low. Only read when ALIGNMENT_TUNING_MODE is set; ignored otherwise.
     input logic btn_left,
@@ -117,8 +127,12 @@ module HDMI_Interface #(
     // with its own VCO, unconstrained by the 1080p outputs, can hit both frequencies (and their exact
     // 5x ratio) cleanly. Like hdmi_clock_divider above, this always generates its clocks regardless of
     // OUTPUT_1024X768. See tools/vivado_scripts/add_1024x768_clocks.tcl for how this IP is created.
+    // It also makes the USB host's 60MHz clock (2026-10-15): its VCO is 975MHz, and 975 / 16.25 is exactly 60.000MHz on
+    // CLKOUT0, the only output with a fractional divider -- so the USB clock is output 1 and 65/325MHz are outputs 2/3
+    // (975/15, 975/3, still exactly 5:1). That retired the separate usb_fs_clock MMCM (~0.12W, i.e. heat).
     hdmi_clock_divider_1024x768 hdmi_clock_generator_1024x768 (
         .sysclk(sysclk),
+        .usbclk_fs(usbclk_fs),    // BUFG'd inside the IP; out to top.sv for the USB host
         .clk_pixel_1024x768(clk_pixel_1024x768),
         .clk_pixel_x5_1024x768(clk_pixel_x5_1024x768),
         .clkfb_in(clk_feedback_in_1024x768),
@@ -572,9 +586,14 @@ module HDMI_Interface #(
 
     // Runtime overrides for things that are otherwise jumper-only. Each is a toggle XORed onto the real input,
     // so the physical jumper still works and the menu just flips whatever it currently says.
-    // Scanlines are jumper-only (SCANLINES); the menu row went to CPU SPEED. The override stays at 0 so the
-    // flags byte keeps its layout, and a block saved by an older build with this bit set is ignored on load.
+    // Scanlines have no menu row (it went to CPU SPEED); the override is set only from the WiFi board's web page.
+    // Older builds always saved bit 64 as 0, so their blocks load with no override.
     logic scanlines_override = 1'b0;
+    // Web-only overrides, see the cfg_ovr port. Saved in bits 74-79 (0 in older blocks: no override).
+    logic lnet_cfg_invid_ovr = 1'b0, lnet_cfg_cpu_rom_ovr = 1'b0, lnet_cfg_io_rom_ovr = 1'b0;
+    logic lnet_cfg_ram_user_set = 1'b0;
+    logic [1:0] lnet_cfg_ram_idx = 2'd0;       // RAM_SEL encoding: 0-3 = 512K / 1M / 1.5M / 2M
+    assign cfg_ovr = {lnet_cfg_ram_user_set, lnet_cfg_ram_idx, lnet_cfg_io_rom_ovr, lnet_cfg_cpu_rom_ovr, lnet_cfg_invid_ovr};
     logic contrast_override_menu = 1'b0;
     // CPU SPEED: follows the SPEED SELECT switches until the menu picks a speed, then the menu owns it --
     // the same pattern as RESOLUTION and the FRAMERATE jumper, so an untouched board behaves like stock.
@@ -689,7 +708,8 @@ module HDMI_Interface #(
     // button press. Called only from the always_ff below, so these registers keep a single driver.
     task automatic start_save();
         settings_save_data <= {
-            {6'b0, esp_target_hdd, esp_wifi_mode, speed_user_set, speed_idx, 1'b1, video_mode, contrast_override_menu, scanlines_override},
+            {lnet_cfg_ram_user_set, lnet_cfg_ram_idx, lnet_cfg_io_rom_ovr, lnet_cfg_cpu_rom_ovr, lnet_cfg_invid_ovr,
+             esp_target_hdd, esp_wifi_mode, speed_user_set, speed_idx, 1'b1, video_mode, contrast_override_menu, scanlines_override},
             {5'b0, v_offset_1024},
             {5'b0, h_offset_1024},
             {5'b0, v_offset_1080p},
@@ -763,6 +783,13 @@ module HDMI_Interface #(
                     // ESP32 MODE existed loads as FLOPPY (and its checksum still matches).
                     esp_wifi_mode <= settings_data[72];
                     esp_target_hdd <= settings_data[73] & settings_data[72];  // bit 73 is 0 in older blocks too
+                    // Web-only overrides; bits 64 and 74-79 are 0 in blocks saved by older builds
+                    scanlines_override    <= settings_data[64];
+                    lnet_cfg_invid_ovr    <= settings_data[74];
+                    lnet_cfg_cpu_rom_ovr  <= settings_data[75];
+                    lnet_cfg_io_rom_ovr   <= settings_data[76];
+                    lnet_cfg_ram_idx      <= settings_data[78:77];
+                    lnet_cfg_ram_user_set <= settings_data[79];
                     // A saved CPU speed takes over from the switches, as a saved resolution does from the
                     // jumper. Blocks saved before this existed have bit 71 clear, so they keep the switches.
                     if (settings_data[71]) begin
@@ -921,6 +948,20 @@ module HDMI_Interface #(
                           esp_target_hdd <= (web_req[10:0] == 11'd2);
                       end
                 4'd7: start_save();
+                // The rest ask for the EFFECTIVE setting; the override is whatever makes the pin read that way.
+                // Inverse video is on when pin ^ override == 1 (the INVERSE VIDEO jumper drives the pin HIGH at INV) -- checked on
+                // hardware 2026-10-15; the first version had this backwards.
+                4'd8:  scanlines_override <= web_req[0] ^ scanlines;
+                4'd9:  lnet_cfg_invid_ovr <= web_req[0] ^ cfg_pins[0];
+                4'd10: if (!lisa_on) lnet_cfg_cpu_rom_ovr <= web_req[0] ^ cfg_pins[1];
+                4'd11: if (!lisa_on) lnet_cfg_io_rom_ovr  <= web_req[0] ^ cfg_pins[2];
+                4'd12: if (!lisa_on) begin
+                           if (web_req[10:0] == 11'd0) lnet_cfg_ram_user_set <= 1'b0;
+                           else if (web_req[10:0] <= 11'd4) begin
+                               lnet_cfg_ram_user_set <= 1'b1;
+                               lnet_cfg_ram_idx      <= web_req[1:0] - 1'b1;
+                           end
+                       end
                 default: ;
             endcase
         end
@@ -1519,8 +1560,17 @@ module HDMI_Interface #(
     //   2      0-1 CPU speed index, 2 1024x768 built in, 3 resolution chosen in the menu (else the jumper),
     //          4 3A ROM (CPU_ROM_SEL), 5 MAX CONTRAST jumper
     //   3-4    H offset (the live mode's)   5-6  H limit   7-8  V offset   9-10  V limit
+    //   11     0 scanlines (effective), 1 SCANLINES jumper, 2 inverse video (effective), 3 INVERSE VIDEO jumper at INV,
+    //          4 3A CPU ROM (effective), 5 CPU ROM switch at 3A, 6 Twiggy I/O ROM (effective), 7 I/O ROM switch at Twiggy
+    //   12     1:0 RAM size (effective, 0-3 = 512K-2MB), 3:2 RAM SIZE jumpers, 4 RAM size chosen on the web
+    // (lisanet_ctrl sends bytes 11-12 after the temperature, so WiFi firmware that predates them still parses the reply)
+    logic [1:0] ram_eff;
+    assign ram_eff = lnet_cfg_ram_user_set ? lnet_cfg_ram_idx : cfg_pins[4:3];
     always_ff @(posedge clk_pixel) begin
         ctrl_status <= {
+            {3'd0, lnet_cfg_ram_user_set, cfg_pins[4:3], ram_eff},
+            {cfg_pins[2], cfg_pins[2] ^ lnet_cfg_io_rom_ovr, cfg_pins[1], CPU_ROM_SEL,
+             cfg_pins[0], cfg_pins[0] ^ lnet_cfg_invid_ovr, scanlines, scanlines_eff},
             {5'd0, v_limit},
             {5'd0, in_1024_mode ? v_offset_1024 : v_offset_1080p},
             {5'd0, h_limit},

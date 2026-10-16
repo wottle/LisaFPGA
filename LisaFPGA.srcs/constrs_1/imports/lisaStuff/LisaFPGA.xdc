@@ -281,6 +281,21 @@ set_false_path -to [get_cells esp_hdd_sys_int_reg]
 ## clk_pixel, already bounded by the clock-level set_max_delay below.)
 set_false_path -to [get_cells ctrl_pwr_int_reg]
 set_false_path -to [get_cells ctrl_rst_int_reg]
+set_false_path -to [get_cells ctrl_nmi_int_reg]
+## The web page's overrides of INVERSE VIDEO, CPU ROM, I/O ROM and RAM SIZE (HDMI_Interface, clk_pixel) feed logic
+## in DOTCK and other domains combinationally, exactly as the jumpers they override do. They are quasi-static: set
+## only by a web write or a settings load, and the ROM/RAM ones only while the Lisa is off. Verify by EFFECT.
+set_false_path -from [get_cells -hierarchical -filter {NAME =~ *lnet_cfg_*_reg*}]
+
+## The FDC's shared RAM (IO_RAM_444C_3, cells fdcram_*) now runs on C16M and acts on the edge where its chip select
+## falls (see the comment in IO_RAM_444C_3.sv: it used to latch on a fabric-made, unclocked negedge, so floppy reads
+## depended on each build's placement). The 6504 side is plain C16M->C16M and is fully timed. The 68K side -- the
+## address A, the write data BD and READ in, the read data back out to the 68K's bus -- crosses from/to DOTCK. The 68K
+## holds A/BD/READ for its whole bus cycle and the strobe comes several C16M cycles after its synchronised _AS, and it
+## samples the read data cycles after the strobe (DTACK), so bound these with a datapath-only delay well inside one
+## C16M cycle rather than timing edge-to-edge between the related clocks. Verify by EFFECT after implementation.
+set_max_delay -datapath_only -from [get_clocks -quiet dotck_*] -to [get_cells -hierarchical -filter {NAME =~ *_FDC_RAM/fdcram_*}] 40.000
+set_max_delay -datapath_only -from [get_cells -hierarchical -filter {NAME =~ *_FDC_RAM/fdcram_q_reg*}] -to [get_clocks -quiet dotck_*] 40.000
 
 ## We do use the framerate select signals in some other places though, so they're fed through synchronizers in those cases
 ## We need false paths for those too
