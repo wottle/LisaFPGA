@@ -97,8 +97,10 @@ and that drive is offline meanwhile. It can only change while the Lisa is off.</
 <p class="mut">Choose <b>lisanet_wifi.ino.bin</b> from the firmware's build folder (not the .merged.bin). The board restarts into it.
 A new version has to run for 20 s before it is kept: if it crashes sooner, the board goes back to this one by itself.</p></div>
 </section>
-<dialog id="ddlg"><p><b>Insert a disk</b> <span class="mut" id="dfor"></span></p><div class="bar"><span class="crumb" id="dcrumb"></span></div>
-<div id="dlist" style="max-height:50vh;overflow:auto"></div><div class="bar"><button id="dcancel">Cancel</button></div></dialog>
+<dialog id="ddlg"><p><b>Insert a disk</b> <span class="mut" id="dfor"></span></p>
+<div class="row"><select id="dsel" style="max-width:100%"><option value="">Scanning the card...</option></select></div>
+<div class="mut" id="dstat"></div>
+<div class="bar"><button id="dload" disabled>Load Disk</button><button id="dcancel">Cancel</button></div></dialog>
 <dialog id="rdlg"><p><b>Keep this resolution?</b></p><p class="mut">If the display went blank, do nothing: it goes back in <span id="rsec">15</span> s.</p>
 <div class="bar"><button id="rkeep">Keep</button><button id="rrevert">Go back now</button></div></dialog>
 </main><script>
@@ -222,9 +224,13 @@ function render(s){
  $('sLisa').textContent=s.lisaOn?'On':'Off';
  const t=$('sTemp');t.textContent=isNaN(s.tempC)?'-':s.tempC.toFixed(1)+' °C'+(s.tempC>=80?' (hot: 85 °C is its limit)':'');
  t.className=s.tempC>=80?'warn':'';
- document.querySelectorAll('#sEsp button').forEach(b=>{b.className=(+b.dataset.v===s.espMode)?'on':'';b.disabled=s.lisaOn;});
+ // While the Lisa is on, only the way back to NORMAL stays open (it brings the drive back; entering a WIFI mode would
+ // take one away under the running Lisa)
+ const back=s.lisaOn&&s.espMode!==0;
+ document.querySelectorAll('#sEsp button').forEach(b=>{b.className=(+b.dataset.v===s.espMode)?'on':'';b.disabled=s.lisaOn&&!(back&&+b.dataset.v===0);});
  $('sEspNote').style.color=s.lisaOn?'var(--bad)':'';
- $('sEspNote').textContent=s.lisaOn?'Locked while the Lisa is on. Shut it down first.':ESPNOTE;
+ $('sEspNote').textContent=!s.lisaOn?ESPNOTE:back?'The Lisa is on: you can switch back to NORMAL (the drive comes back online), but not into a WIFI mode until it is off.':
+  'Locked while the Lisa is on. Shut it down first.';
  const res=$('sRes');res.querySelector('option[value="2"]').disabled=!s.has1024;if(document.activeElement!==res)res.value=s.videoMode;
  if(document.activeElement!==$('sH'))$('sH').value=s.hOff;$('sH').max=s.hLim;$('sHl').textContent='0 - '+s.hLim;
  const vroom=s.vLim>0;if(document.activeElement!==$('sV'))$('sV').value=s.vOff;$('sV').max=s.vLim;
@@ -262,8 +268,9 @@ function showTab(set){$('tabF').className=set?'':'on';$('tabS').className=set?'o
  else{filesCheck(true);fpoll=setInterval(()=>filesCheck(false),3000);}}
 $('tabF').onclick=()=>showTab(false);$('tabS').onclick=()=>showTab(true);
 // ESP32 mode, from the Settings tab or the Files tab's shortcut buttons. The chosen ESP32 restarts as the SD server.
-async function espMode(v){await fdo(async()=>{await fset(6,v);
- msg(v?'Switching: the chosen drive restarts as the SD server, which takes a few seconds...':'Back to NORMAL: both drives are drives again.');
+async function espMode(v){await fdo(async()=>{if(v===0)dRetryAt=Date.now()+10000;   // ESFloppy needs ~8 s to restart as the drive
+ await fset(6,v);
+ msg(v?'Switching: the chosen drive restarts as the SD server, which takes a few seconds...':'Back to NORMAL: both drives are drives again (the floppy drive is back in about 10 s).');
  if(v&&!$('tFiles').hidden){setTimeout(()=>load().then(space),4000);}});}
 document.querySelectorAll('#sEsp button').forEach(b=>b.onclick=()=>espMode(+b.dataset.v));
 document.querySelectorAll('#nosd button').forEach(b=>b.onclick=()=>espMode(+b.dataset.esp));
@@ -317,6 +324,12 @@ $('fwBack').onclick=()=>{if(!confirm($('fwBack').textContent+'? The board restar
 // Older ESFloppy firmware never answers; then only try again every 30 s, so the WiFi board isn't kept waiting.
 let dRetryAt=0,dBusy=false;
 async function drefresh(){const c=$('dCard');
+ // In WIFI FDD the drive is offline (ESFloppy is serving its card): say so, with the way back -- allowed even while
+ // the Lisa is on, since returning to NORMAL only brings the drive back.
+ if(fst&&fst.espMode===1){c.hidden=false;const rows=$('dRows');rows.innerHTML='';const row=document.createElement('div');row.className='row';
+  const t=document.createElement('span');t.textContent='Offline: ESFloppy is serving its SD card (WIFI FDD).';
+  const b=document.createElement('button');b.textContent='Switch to NORMAL';b.onclick=()=>espMode(0);row.append(t,b);rows.append(row);
+  $('dNote').textContent='Back in NORMAL, ESFloppy is the floppy drive again (mount-next inserts its disk), and you can insert or eject here.';return;}
  if(!fst||fst.espMode!==0||Date.now()<dRetryAt||dBusy){if(!fst||fst.espMode!==0)c.hidden=true;return;}
  dBusy=true;try{const r=await fetch('/api/drive');if(!r.ok)throw 0;drender(await r.json());c.hidden=false;dRetryAt=0;}
  catch(e){c.hidden=true;dRetryAt=Date.now()+30000;}dBusy=false;}
@@ -337,22 +350,25 @@ function drender(d){const rows=$('dRows');rows.innerHTML='';
 function deject(v,force){
  if(force&&!confirm('Force-eject '+base(v.name)+'? This is like pulling the disk out of the drive: if the Lisa is using it, unsaved changes are lost and the disk may need repairing. Eject it from LOS instead when you can.'))return;
  fdo(async()=>{await fpga('/api/drive/eject?drive='+v.n+'&force='+(force?1:0),{method:'POST'});msg(force?'Ejected.':'Eject requested: the Lisa ejects the disk when it is ready.');dRetryAt=0;await drefresh();});}
-let dDrive=1,dCwd='/';
-function dpick(n,twiggy){dDrive=n;$('dfor').textContent=twiggy?(n===0?'into the upper drive':'into the lower drive'):'';const g=$('ddlg');g.showModal();dgo('/');}
-$('dcancel').onclick=()=>$('ddlg').close();
-async function dgo(p){dCwd=p;const l=$('dlist'),c=$('dcrumb');l.innerHTML='<div class=mut>Loading (checking each image takes a moment)...</div>';c.innerHTML='';
- const parts=p.split('/').filter(Boolean);const add=(t,q)=>{const a=document.createElement('a');a.href='#';a.textContent=t;a.onclick=e=>{e.preventDefault();dgo(q)};c.append(a)};
- add('SD card','/');let q='';for(const x of parts){q+='/'+x;c.append(' / ');add(x,q);}
- try{const r=await fpga('/api/drive/ls?path='+encodeURIComponent(p));l.innerHTML='';
-  const es=r.entries.sort((a,b)=>(b.d-a.d)||a.n.localeCompare(b.n));
-  if(p!=='/')es.unshift({n:'..',d:1,up:1});
-  for(const e of es){const row=document.createElement('div');row.className='row';const full=e.up?(p.replace(/\/[^/]*$/,'')||'/'):join(p,e.n);
-   if(e.d){const a=document.createElement('a');a.href='#';a.className='dir';a.textContent=e.n+(e.up?'':'/');a.onclick=ev=>{ev.preventDefault();dgo(full)};row.append(a);}
-   else{const b=document.createElement('button');b.textContent='Insert';b.onclick=()=>dinsert(full);const s=document.createElement('span');s.textContent=e.n;
-    const z=document.createElement('span');z.className='mut';z.textContent=size(e.s);row.append(b,s,z);}
-   l.append(row);}
-  if(!es.length)l.innerHTML='<div class=mut>No folders or disk images this drive can use here.</div>';
- }catch(e){l.innerHTML='';l.textContent=e.message;}}
+// Insert: one dropdown of every image on the card that this drive mode accepts (the drive's own filter, as on its
+// OLED), found by walking the folders (hidden ones excluded, 4 levels deep), then Load Disk.
+let dDrive=1,dScan=0;
+async function dscanAll(){const found=[];
+ const walk=async(p,depth)=>{const r=await fpga('/api/drive/ls?path='+encodeURIComponent(p));
+  for(const e of r.entries){if(e.n.startsWith('.'))continue;const full=join(p,e.n);
+   if(e.d){if(depth<4)await walk(full,depth+1);}else found.push({p:full,s:e.s});}};
+ await walk('/',0);return found.sort((a,b)=>a.p.localeCompare(b.p));}
+function dpick(n,twiggy){dDrive=n;$('dfor').textContent=twiggy?(n===0?'into the upper drive':'into the lower drive'):'';
+ const s=$('dsel'),L=$('dload'),my=++dScan;s.innerHTML='<option value="">Scanning the card for disk images...</option>';L.disabled=true;
+ $('dstat').textContent='Each image is checked, so this can take a few seconds.';$('ddlg').showModal();
+ dscanAll().then(list=>{if(my!==dScan)return;s.innerHTML='';
+  s.add(new Option(list.length?'Choose a disk image...':'No disk images this drive can use',''));
+  for(const f of list)s.add(new Option(f.p.replace(/^\//,'')+'  ('+size(f.s)+')',f.p));
+  $('dstat').textContent=list.length+' image'+(list.length===1?'':'s')+' found.';})
+ .catch(e=>{if(my!==dScan)return;s.innerHTML='<option value="">Could not read the card</option>';$('dstat').textContent=e.message;});}
+$('dsel').onchange=()=>{$('dload').disabled=!$('dsel').value;};
+$('dload').onclick=()=>{const p=$('dsel').value;if(p)dinsert(p);};
+$('dcancel').onclick=()=>{dScan++;$('ddlg').close();};
 async function dinsert(path){$('ddlg').close();
  await fdo(async()=>{try{await fpga('/api/drive/insert?drive='+dDrive+'&path='+encodeURIComponent(path),{method:'POST'});}
   catch(e){throw new Error(/UI_BUSY/.test(e.message)?'ESFloppy\'s own menu is open; close it and try again.':/EXISTS/.test(e.message)?'That drive already has a disk.':

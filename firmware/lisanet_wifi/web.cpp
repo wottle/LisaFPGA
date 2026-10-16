@@ -396,7 +396,7 @@ static void handleMountNextSet() {
 static void sendFpgaResult(int s) {
     if (s == fpgactl::OK) { server.send(200, "application/json", "{}"); return; }
     int code = s == fpgactl::LOCKED ? 409 : s == fpgactl::BAD_REQUEST ? 400 : s == fpgactl::NO_REPLY ? 503 : 500;
-    const char *why = s == fpgactl::LOCKED ? "The Lisa is on: the ESP32 mode, ROMs and RAM size can only change while it is off"
+    const char *why = s == fpgactl::LOCKED ? "The Lisa is on: the ROMs, the RAM size and switching into a WIFI mode have to wait until it is off"
                     : s == fpgactl::NO_REPLY ? "The FPGA is not answering (it needs the control-channel build)"
                     : fpgactl::statusName(s);
     server.send(code, "application/json", String("{\"error\":\"") + why + "\"}");
