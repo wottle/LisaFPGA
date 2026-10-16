@@ -172,7 +172,40 @@ shows the new controls only when the FPGA reports version 2. Gotcha: `.row{displ
 work again. ESFloppy runs our firmware with the OLED guard + floppy remote (committed in the ESFloppy repo as f3df891 /
 bc71bad on `lisanet`, not pushed; the remote is dormant on this build). ESProFile is back on its LisaNet firmware
 (`lisanet` branch HEAD 81f33f3, rebuilt and flashed 2026-10-16). ESFloppy card: `/hd` renamed back (done). XIAO back
-on J21. The MMCM-merge build (below) is still to be checked/flashed.
+on J21. The MMCM-merge build below was FLASHED 2026-10-16 morning; it settles at 89-90 C with no case fan (logged
+20 min, flat; the Lisa's state makes no visible difference -- the heat is always-on infrastructure).
+**USB on the 1080p MMCM + 1024x768 DROPPED -- built 2026-10-16 10:49, uncommitted, not yet on hardware:
+WNS +0.163 / WHS +0.065, 0 failing setup/hold, 9 pulse-width entries (one fewer BUFGMUX on the 742 MHz path);
+3 MMCMs (= upstream), BRAM 26 tiles (was 42: the 1024x768 AA path's framebuffer copy is gone), 22738 LUTs, power
+estimate 1.212 W (upstream ~1.18).** `OUTPUT_1024X768 = 0`; in HDMI_Interface the 1024x768 MMCM and the stage-B
+BUFGMUXes are now inside `generate if (OUTPUT_1024X768)` (g_clk_1024x768 / g_mux_1024x768), so a build without it
+carries NEITHER (an MMCM runs whether or not its clocks are selected). `hdmi_clock_divider` now has 5 outputs:
+usbclk_fs on CLKOUT0 = 742.1875 / 12.375 = 59.975 MHz (-0.042%, inside full speed's +-0.05%), BUFG; the 1080p clocks
+unchanged on CLKOUT1-4 (742.1875 / 371.09 / 148.4375 / 74.21875, dividers 1/2/5/10). **The IP is in OVERRIDE_MMCM mode with
+M = 11.875, D = 2 pinned: asked for 60.000 the wizard chose a 750 MHz VCO, putting both 1080p modes 1% off** -- caught by
+the script's exact-frequency check. usb_sie/usb_softcpu gained `FRAME_CLKS` (top.sv passes 59975) so the SOF interval
+is exactly 1.000 ms. hdmi_clock_divider_1024x768.xci restored to its pre-merge two outputs (from b7fc3d5). XDC:
+`clk_audio` -source moved to `bufgmux_clk_pixel_a/O` (the stage-B mux is gone -- a 1024x768 build must point it back),
+1024x768-only lines made -quiet/wildcarded, the dead fdcram_q line removed. Verified on top_routed.dcp:
+`usbclk_fs_hdmi_clock_divider` 16.674 ns from hdmi_clock_generator CLKOUT0, all its crossings Asynchronous Clock Groups,
+intra slack +5.700; 1080p30<->60 still Logically Exclusive (the empty 1024x768 group does NOT cancel the command);
+clk_audio exists; zero *1024x768* cells. Expected critical warnings: the two unused IPs' XDC files (1024x768,
+usb_fs_clock) and the 1024x768 group/CE lines matching nothing. **JTAG-tested 2026-10-16 (bitstream saved as
+`tools/esp32_wifi_test/backup/fpga_no1024_2026-10-16.bit`): 1024x768 gone from the OSD (greyed on the web page),
+wireless keyboard + mouse work at 59.975 MHz, saved screen position correct, and the FLOPPY REMOTE works end to end
+-- insert and eject from the web page while LOS runs (with XIAO 0.8's dropdown).** Hub keyboard not yet tried.
+A follow-on build (2026-10-16) lets ESP32 MODE go back to NORMAL while the Lisa is on (menu OK, web reg 6 value 0;
+lisanet_ctrl only LOCKs reg 6 for non-zero values -- testbench updated) -- its first build MISSED timing by 107 ps on
+`wifi_seen_cnt -> menu_pixel` (11 levels at 1080p60, the menu-draw path flagged above), fixed by registering
+`wifi_board_present`; rebuild running.
+**MMCM-merge build DONE (2026-10-16 00:52, commit ef8d38b): WNS +0.376 / WHS +0.056, 0 failing setup/hold,
+only the 10 known pulse-width entries; 4 MMCMs; 23095 LUTs; power estimate 1.383 W (was 1.527).** Verified on
+top_routed.dcp: `usbclk_fs_hdmi_clock_divider_1024x768` = 16.667 ns (60.000 MHz) from the merged MMCM's CLKOUT0, the
+1024x768 pixel clocks unchanged (CLKOUT1/2), every usbclk_fs crossing reports Asynchronous Clock Groups, intra slack
++5.677. New critical warnings are benign: the unused usb_fs_clock IP's own XDC finds no module (like the ILA IPs), and the
+FDC-RAM `fdcram_q_reg*` set_max_delay binds nothing (the RAM became RAMB18 with its read register inside) -- drop that
+line next time the XDC is touched. Next: flash it (Lisa off, user's go-ahead), cold boot, XIAO 0.7, test the Floppy
+drive card, measure the temperature.
 **Board state at end of 2026-10-15 (superseded):** running CLEAN UPSTREAM -- v1.6 `top.mcs` in
 the config flash, Alex's ESFloppy and ESProFile firmware (from the 8 MB backups), XIAO unplugged; ESFloppy's card has
 `/hd` renamed `/.hd`, a pristine `/.LISANET/1000-miles-pristine.dc42`, `/LisaCalc.image`; the saved settings block at
