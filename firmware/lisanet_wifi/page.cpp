@@ -33,7 +33,7 @@ select,input[type=number]{font:inherit;padding:4px 6px;border:1px solid var(--li
 input[type=number]{width:80px}.warn{color:var(--bad);font-weight:600}
 </style></head><body><main>
 <h1>LisaNet <span class="mut" id="who"></span></h1>
-<nav class="tabs"><button id="tabS" class="on">Settings</button><button id="tabF">Files</button></nav>
+<nav class="tabs"><button id="tabS" class="on">Settings</button><button id="tabF" hidden>Files</button></nav>
 <div id="msg"></div>
 <section id="tFiles" hidden>
 <div class="card" id="fOff" hidden><h3>Not available while the Lisa is on</h3>
@@ -42,7 +42,7 @@ Settings tab), and this page comes back by itself. To change the floppy disk whi
 the Settings tab.</p></div>
 <div id="fBody">
 <div class="mut sp"><span id="info">Card space</span> <button id="infob" class="mini" title="Recalculate card space">&#x21bb;</button></div>
-<div class="bar" id="nosd" hidden><span class="mut">Switch the board to:</span><button data-esp="1">Manage ESFloppy's card (WIFI FDD)</button><button data-esp="2">Manage ESProFile's card (WIFI HDD)</button></div>
+<div class="bar" id="nosd" hidden><span class="mut">Switch to:</span><button data-esp="1">Manage ESFloppy files</button><button data-esp="2">Manage ESProFile files</button></div>
 <div class="bar"><span class="crumb" id="crumb"></span></div>
 <div class="bar">
 <label class="btn">Upload<input type="file" id="file" multiple hidden></label>
@@ -67,9 +67,10 @@ ESFloppy insert that image in drive 1 every time it starts in FLOPPY mode, until
 <div class="row"><button id="bPower">Press power button</button><button id="bReset" class="danger">Reset</button><button id="bNmi" class="danger" hidden>NMI</button></div></div>
 <div class="card" id="dCard" hidden><h3>Floppy drive</h3><div id="dRows"></div><div class="mut" id="dNote"></div></div>
 <div class="card"><h3>ESP32 mode</h3>
-<div class="row"><div class="seg" id="sEsp"><button data-v="0">NORMAL</button><button data-v="1">WIFI FDD</button><button data-v="2">WIFI HDD</button></div></div>
-<div class="mut" id="sEspNote">NORMAL: both drives are drives. WIFI FDD / WIFI HDD: that drive's SD card is managed from the Files tab instead,
-and that drive is offline meanwhile. It can only change while the Lisa is off.</div></div>
+<div class="row"><div class="seg" id="sEsp"><button data-v="0">Normal</button><button data-v="1">Manage ESFloppy files</button><button data-v="2">Manage ESProFile files</button></div></div>
+<div class="mut" id="sEspNote">Normal: both drives are the Lisa's drives. Manage ESFloppy files / Manage ESProFile files: that drive's SD card
+opens in the Files tab, and the drive is offline meanwhile. Those can only be chosen while the Lisa is off. (The on-screen
+menu calls them WIFI FDD and WIFI HDD.)</div></div>
 <div class="card"><h3>Display</h3>
 <div class="row"><label class="k" for="sRes">Resolution</label><select id="sRes"><option value="0">1080p30</option><option value="1">1080p60</option><option value="2">1024x768</option></select></div>
 <div class="row"><label class="k">Horizontal</label><button data-ax="2" data-d="-8">&laquo;</button><button data-ax="2" data-d="-1">&lsaquo;</button>
@@ -123,7 +124,7 @@ const join=(d,n)=>(d.endsWith('/')?d:d+'/')+n;
 const isImg=n=>/\.(dc42|image|img)$/i.test(n);
 function msg(t,bad){const m=$('msg');m.textContent=t;m.className=t?(bad?'err':'ok'):'';}
 async function api(url,opt){const r=await fetch(url,opt);let j={};try{j=await r.json()}catch(e){}
- if(!r.ok)throw new Error(r.status==503?'No SD card server is reachable: switch the board to WIFI FDD or WIFI HDD, below or on the Settings tab.':(j.error||('HTTP '+r.status)));return j;}
+ if(!r.ok)throw new Error(r.status==503?'No SD card server is reachable yet: the drive takes a few seconds to restart as one. Try again shortly, or switch below.':(j.error||('HTTP '+r.status)));return j;}
 function size(b){if(b<1024)return b+' B';if(b<1048576)return (b/1024).toFixed(1)+' KB';if(b<1073741824)return (b/1048576).toFixed(1)+' MB';return (b/1073741824).toFixed(2)+' GB';}
 function crumbs(){const c=$('crumb');c.innerHTML='';const parts=cwd.split('/').filter(Boolean);
  const add=(t,p)=>{const a=document.createElement('a');a.href='#';a.textContent=t;a.onclick=e=>{e.preventDefault();go(p)};c.append(a)};
@@ -204,7 +205,7 @@ async function copyToProfile(src){
   // The Mac's hidden ._ companion of the old profile.image follows it (not critical, so failures are ignored)
   if(have.has('._profile.image'))try{await api(backup?'/api/mv?from=%2F._profile.image&to='+encodeURIComponent(join('/','._'+backup.slice(1)))
    :'/api/rm?path=%2F._profile.image',{method:'POST'})}catch(e){}
-  await load();msg('Copied '+src+' to profile.image. ESProFile will boot from it when ESP32 MODE is back to NORMAL.');
+  await load();msg('Copied '+src+' to profile.image. ESProFile will boot from it once the drives are back to Normal.');
  }catch(e){await load();msg(e.message,1);}
  $('prog').hidden=true;$('progt').textContent='';}
 $('all').onchange=e=>{document.querySelectorAll('input.sel').forEach(c=>c.checked=e.target.checked);selChanged();};
@@ -214,7 +215,7 @@ function upload(f){return new Promise((res,rej)=>{const x=new XMLHttpRequest();x
  x.setRequestHeader('X-Path',encodeURIComponent(join(cwd,f.name)));x.setRequestHeader('Content-Type','application/octet-stream');
  x.upload.onprogress=e=>{$('prog').max=e.total;$('prog').value=e.loaded;$('progt').textContent=f.name+' '+size(e.loaded)+' / '+size(e.total)};
  x.onload=()=>{let j={};try{j=JSON.parse(x.responseText)}catch(e){}
-  x.status==200?res():rej(new Error(x.status==503?'No SD card server is reachable: switch the board to WIFI FDD or WIFI HDD (Settings tab).':x.status==507?'No contiguous space on the card for '+f.name:(j.error||'HTTP '+x.status)))};
+  x.status==200?res():rej(new Error(x.status==503?'No SD card server is reachable: on the Settings tab, choose Manage ESFloppy files or Manage ESProFile files.':x.status==507?'No contiguous space on the card for '+f.name:(j.error||'HTTP '+x.status)))};
  x.onerror=()=>rej(new Error('Upload failed'));x.send(f);});}
 $('file').onchange=async e=>{const fs=[...e.target.files];e.target.value='';$('prog').hidden=false;
  try{for(const f of fs)await upload(f);msg('Uploaded '+fs.length+' file(s)');}catch(err){msg(err.message,1);}
@@ -237,12 +238,13 @@ function render(s){
  $('sLisa').textContent=s.lisaOn?'On':'Off';
  const t=$('sTemp');t.textContent=isNaN(s.tempC)?'-':s.tempC.toFixed(1)+' °C'+(s.tempC>=80?' (hot: 85 °C is its limit)':'');
  t.className=s.tempC>=80?'warn':'';
- // While the Lisa is on, only the way back to NORMAL stays open (it brings the drive back; entering a WIFI mode would
- // take one away under the running Lisa)
+ // While the Lisa is on, only the way back to Normal stays open (it brings the drive back; managing a drive's files
+ // would take it away under the running Lisa). The Files tab exists only while a drive's files are being managed.
  const back=s.lisaOn&&s.espMode!==0;
+ $('tabF').hidden=s.espMode===0;
  document.querySelectorAll('#sEsp button').forEach(b=>{b.className=(+b.dataset.v===s.espMode)?'on':'';b.disabled=s.lisaOn&&!(back&&+b.dataset.v===0);});
  $('sEspNote').style.color=s.lisaOn?'var(--bad)':'';
- $('sEspNote').textContent=!s.lisaOn?ESPNOTE:back?'The Lisa is on: you can switch back to NORMAL (the drive comes back online), but not into a WIFI mode until it is off.':
+ $('sEspNote').textContent=!s.lisaOn?ESPNOTE:back?'The Lisa is on: you can switch back to Normal (the drive comes back online), but not manage a drive\'s files until it is off.':
   'Locked while the Lisa is on. Shut it down first.';
  const res=$('sRes');res.querySelector('option[value="2"]').disabled=!s.has1024;if(document.activeElement!==res)res.value=s.videoMode;
  if(document.activeElement!==$('sH'))$('sH').value=s.hOff;$('sH').max=s.hLim;$('sHl').textContent='0 - '+s.hLim;
@@ -268,7 +270,8 @@ function render(s){
  $('sRamJ').textContent='(jumpers: '+RAM[s.ramSwitch]+(s.ramUserSet?'; '+RAM[s.ram]+' set here':'')+')';
  $('sMachNote').style.color=s.lisaOn?'var(--bad)':'';
  $('sMachNote').textContent=s.lisaOn?'Locked while the Lisa is on. Shut it down first.':MACHNOTE;}
-async function frefresh(){try{const s=await fpga('/api/fpga');fst=s;render(s);}catch(e){msg(e.message,1);}drefresh();
+// An FPGA without the control channel can't say which mode it is in: then the Files tab stays available, as before.
+async function frefresh(){try{const s=await fpga('/api/fpga');fst=s;render(s);}catch(e){msg(e.message,1);$('tabF').hidden=false;}drefresh();
  if(fst&&fst.version>=3)fninfo();}
 // FujiNet card: the adapter's own settings and what the Lisa has been asking for
 function fnshow(i){if(document.activeElement!==$('fnBaud'))$('fnBaud').value=i.baud;if(document.activeElement!==$('fnTz'))$('fnTz').value=i.tz;
@@ -282,8 +285,12 @@ async function fnset(q){await fdo(async()=>{fnshow(await fpga('/api/fujinet?'+q,
 // While the Lisa is on, the Files tab shows only a notice; it checks every 3 s and loads the list once the Lisa is off.
 // An FPGA without the control channel (no answer) counts as off, so the tab works as before there.
 let spaced=false,filesLisaOn=null;
-async function filesCheck(first){let on=false;try{on=!!(await fpga('/api/fpga')).lisaOn}catch(e){}
- if($('tFiles').hidden||(on===filesLisaOn&&!first))return;filesLisaOn=on;$('fOff').hidden=!on;$('fBody').hidden=on;
+// The tab closes by itself if the drives go back to Normal some other way (the on-screen menu, or the Lisa switched on
+// while ESProFile's files were open).
+async function filesCheck(first){let on=false,mode=-1;try{const s=await fpga('/api/fpga');on=!!s.lisaOn;mode=s.espMode;}catch(e){}
+ if($('tFiles').hidden)return;
+ if(mode===0){$('tabF').hidden=true;showTab(true);msg('The Files tab closed: the drives are back to Normal.');return;}
+ if(on===filesLisaOn&&!first)return;filesLisaOn=on;$('fOff').hidden=!on;$('fBody').hidden=on;
  if(on){msg('');return;}
  if(!spaced){spaced=true;load().then(space);}else load();}
 function showTab(set){$('tabF').className=set?'':'on';$('tabS').className=set?'on':'';$('tFiles').hidden=set;$('tSet').hidden=!set;msg('');
@@ -294,8 +301,9 @@ $('tabF').onclick=()=>showTab(false);$('tabS').onclick=()=>showTab(true);
 // ESP32 mode, from the Settings tab or the Files tab's shortcut buttons. The chosen ESP32 restarts as the SD server.
 async function espMode(v){await fdo(async()=>{if(v===0)dRetryAt=Date.now()+10000;   // ESFloppy needs ~8 s to restart as the drive
  await fset(6,v);
- msg(v?'Switching: the chosen drive restarts as the SD server, which takes a few seconds...':'Back to NORMAL: both drives are drives again (the floppy drive is back in about 10 s).');
- if(v&&!$('tFiles').hidden){setTimeout(()=>load().then(space),4000);}});}
+ msg(v?'Switching: the drive restarts as the SD card server, and its files open here in a few seconds...':'Back to Normal: both drives are the Lisa\'s drives again (the floppy drive is back in about 10 s).');
+ // Give the drive ~4 s to restart as the server, then show its files
+ if(v)setTimeout(()=>{if(!fst||fst.espMode!==v)return;if($('tFiles').hidden)showTab(false);else load().then(space);},4000);});}
 document.querySelectorAll('#sEsp button').forEach(b=>b.onclick=()=>espMode(+b.dataset.v));
 document.querySelectorAll('#nosd button').forEach(b=>b.onclick=()=>espMode(+b.dataset.esp));
 // Resolution, with a way back: the page runs on another screen, so if the display rejects the mode, it reverts by itself
@@ -349,16 +357,16 @@ $('fwFile').onchange=e=>{const f=e.target.files[0];e.target.value='';if(!f)retur
  x.onerror=()=>{$('fwProg').hidden=true;$('fwT').textContent='';msg('Upload failed',1);};x.send(f);};
 $('fwBack').onclick=()=>{if(!confirm($('fwBack').textContent+'? The board restarts.'))return;
  fdo(async()=>{await fpga('/api/fw/rollback',{method:'POST'});fwBack('Going back.');});};
-// ---- Floppy drive remote control: ESFloppy's drive firmware answers in NORMAL mode, Lisa on or off ----
+// ---- Floppy drive remote control: ESFloppy's drive firmware answers in Normal mode, Lisa on or off ----
 // Older ESFloppy firmware never answers; then only try again every 30 s, so the WiFi board isn't kept waiting.
 let dRetryAt=0,dBusy=false;
 async function drefresh(){const c=$('dCard');
- // In WIFI FDD the drive is offline (ESFloppy is serving its card): say so, with the way back -- allowed even while
- // the Lisa is on, since returning to NORMAL only brings the drive back.
+ // While ESFloppy's files are being managed the drive is offline: say so, with the way back -- allowed even while
+ // the Lisa is on, since returning to Normal only brings the drive back.
  if(fst&&fst.espMode===1){c.hidden=false;const rows=$('dRows');rows.innerHTML='';const row=document.createElement('div');row.className='row';
-  const t=document.createElement('span');t.textContent='Offline: ESFloppy is serving its SD card (WIFI FDD).';
-  const b=document.createElement('button');b.textContent='Switch to NORMAL';b.onclick=()=>espMode(0);row.append(t,b);rows.append(row);
-  $('dNote').textContent='Back in NORMAL, ESFloppy is the floppy drive again (mount-next inserts its disk), and you can insert or eject here.';return;}
+  const t=document.createElement('span');t.textContent='Offline while ESFloppy\'s files are being managed.';
+  const b=document.createElement('button');b.textContent='Switch to Normal';b.onclick=()=>espMode(0);row.append(t,b);rows.append(row);
+  $('dNote').textContent='Back in Normal, ESFloppy is the floppy drive again (mount-next inserts its disk), and you can insert or eject here.';return;}
  if(!fst||fst.espMode!==0||Date.now()<dRetryAt||dBusy){if(!fst||fst.espMode!==0)c.hidden=true;return;}
  dBusy=true;try{const r=await fetch('/api/drive');if(!r.ok)throw 0;drender(await r.json());c.hidden=false;dRetryAt=0;}
  catch(e){c.hidden=true;dRetryAt=Date.now()+30000;}dBusy=false;}

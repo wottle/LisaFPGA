@@ -11,7 +11,7 @@ Through a web page at `http://lisanet.local/` it lets you:
 - **Insert and eject floppies** while the Lisa is running.
 - **Act as a FujiNet** on the Lisa's Serial B, for Lisa programs written for an RS-232 FujiNet, such as
   [LisaFuji](https://github.com/GyroPilot/Apple-LisaFuji) (news, Wikipedia, weather, the network clock).
-- **Act as a Hayes-style modem** on the Lisa's Serial A (AT commands, for LisaTerminal) while ESP32 MODE is WIFI FDD.
+- **Act as a Hayes-style modem** on the Lisa's Serial A (AT commands, for LisaTerminal) while ESFloppy's files are being managed (Manage ESFloppy files; WIFI FDD in the menu).
 - **Update itself over WiFi.**
 
 Why an external board: the rev 3 board's own ESP32-S3s (ESFloppy and ESProFile) have no antenna -- their RF pin is
@@ -147,7 +147,7 @@ Then browse to **`http://lisanet.local/`** (or the XIAO's IP address, shown on t
 - If the saved network cannot be found for a minute, the setup network comes back, and the XIAO keeps looking for the
   saved one every few minutes.
 - **Holding the B button for 5 seconds** forgets the network and the web password and starts setup from scratch.
-- The same can be done with AT commands, on the USB console, or from LisaTerminal on Serial A in WIFI FDD mode:
+- The same can be done with AT commands, on the USB console, or from LisaTerminal on Serial A while managing ESFloppy files:
   `AT+WSCAN`, `AT+WJOIN="network","password"`, `AT+WEBPASS="password"`.
 
 The web page uses HTTP Basic authentication over plain HTTP: fine on a home network, not for the internet.
@@ -157,20 +157,21 @@ The web page uses HTTP Basic authentication over plain HTTP: fine on a home netw
 1. Turn the board off, wire the XIAO to J21 as above, power it, and turn the board on.
 2. Within a couple of seconds the on-screen menu (hold LEFT + RIGHT for about 3 s) shows **ESP32 MODE** as its first
    row, and the web page's **Settings** tab answers.
-3. **ESP32 MODE** picks what the SD cards are doing:
-   - **NORMAL**: both emulators are the Lisa's drives, as usual. The Settings tab, the floppy remote and the FujiNet
-     work; Serial A is its own port.
-   - **WIFI FDD** / **WIFI HDD**: ESFloppy's / ESProFile's card is managed from the Files tab, and that drive is offline
-     meanwhile; the Lisa's Serial A goes to the XIAO's AT modem. These can only be chosen with the Lisa off, and
-     switching the Lisa on drops WIFI HDD back to NORMAL (the Lisa needs its hard disk). WIFI FDD stays, so the modem
-     can be used from a running Lisa.
-   It can also be changed from the Settings tab. Press **Save settings** to keep any setting across a power cycle.
+3. The **ESP32 mode** card on the Settings tab (ESP32 MODE in the on-screen menu) picks what the SD cards are doing:
+   - **Normal** (menu: NORMAL): both emulators are the Lisa's drives, as usual. The Settings tab, the floppy remote and
+     the FujiNet work; Serial A is its own port.
+   - **Manage ESFloppy files** / **Manage ESProFile files** (menu: WIFI FDD / WIFI HDD): that drive's SD card opens in
+     the **Files** tab, which only appears in these two modes, and the drive is offline meanwhile; the Lisa's Serial A
+     goes to the XIAO's AT modem. These can only be chosen with the Lisa off. Switching the Lisa on drops Manage
+     ESProFile files back to Normal (the Lisa needs its hard disk) and the Files tab closes; Manage ESFloppy files
+     stays, so the modem can be used from a running Lisa.
+   Press **Save settings** to keep any setting across a power cycle.
 
 ## Using the FujiNet (Serial B)
 
 1. On the Settings tab's **FujiNet (Serial B)** card, set **Serial B** to **This WiFi board (FujiNet adapter)**. The
    Lisa's Serial B then goes to the XIAO instead of its own connector; no cable is needed. It shares the XIAO's two
-   serial wires with the Serial A modem, so while it is on, Serial A is its own port even in WIFI FDD.
+   serial wires with the Serial A modem, so while it is on, Serial A is its own port in every mode.
 2. Set the **baud rate** to what the Lisa program uses (LisaFuji: 9600 or 19200, from its Speed menu) and your **time
    zone** in POSIX form, for example `EST5EDT,M3.2.0,M11.1.0` (US Eastern) or `CET-1CEST,M3.5.0,M10.5.0/3`
    (Central Europe). The network clock comes from internet time.
@@ -200,7 +201,8 @@ If an update ever leaves the web page unreachable, flash over USB again as in Fi
 | Symptom | Look at |
 |---|---|
 | "The FPGA is not answering" | The D7 -> J21 pin 2 wire; and that the FPGA runs a LisaNet build. |
-| Files tab: "No SD card server is reachable" | ESP32 MODE must be WIFI FDD or WIFI HDD, and ESFloppy / ESProFile must run the LisaNet firmware. |
+| No Files tab | It only appears in Manage ESFloppy files or Manage ESProFile files (Settings tab). |
+| Files tab: "No SD card server is reachable" | The drive takes a few seconds to restart as the server; if it persists, ESFloppy / ESProFile must run the LisaNet firmware. |
 | No ESP32 MODE row in the menu | The XIAO is not powered, or D6 is not on J21 pin 4 (that is how the board detects it). |
 | The XIAO keeps saying "waiting for download" | Press R once by itself. |
 | The USB console shows nothing | Turn DTR on in the terminal. |
