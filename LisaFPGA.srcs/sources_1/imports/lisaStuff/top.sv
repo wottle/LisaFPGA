@@ -739,7 +739,8 @@ module top(
     // is its link input held at 0.
     // ESPROFILE_COMM_BUS was a hard-coded 3'b101 that ESProFile's firmware never read. SCC channel A is cut off from
     // the physical Serial A pins in both WIFI modes, with CTS, DCD and DSR held asserted (no hardware flow control
-    // yet); the physical TXDA pin is parked at mark. Serial B is untouched.
+    // yet); the physical TXDA pin is parked at mark. Serial B moves to GPIO2/3 instead when the web page's FujiNet
+    // setting is on (below).
     // ---------------------------------------------------------------------------------------------
     logic esp_wifi_mode_menu;   // clk_pixel domain, straight from the menu
     logic esp_target_hdd_menu;  // clk_pixel domain: 0 = ESFloppy, 1 = ESProFile; only ever 1 in WIFI
@@ -761,9 +762,21 @@ module top(
         esp_mode_sys_int <= esp_wifi_mode_menu & wifi_present_menu;   // no board on J21: both ESP32s stay NORMAL
         esp_mode_sys     <= esp_mode_sys_int;
     end
+    // Serial B to the WiFi board (the web page's FujiNet setting, in any ESP32 mode). It shares GPIO2/3 with the Serial
+    // A modem, and wins: with it on, Serial A stays on its real port even in WIFI FDD. So esp_mode_dot means "Serial A
+    // goes to the WiFi board", which is no longer quite the same as the ESP32 mode (esp_mode_sys still is).
+    // Value 2 is a bench test: the REAL Serial B port is wired straight to the WiFi board instead (and the SCC sees an
+    // idle line), so a PC on the board's Serial B USB port can talk to the FujiNet adapter.
+    logic [1:0] serial_b_wifi_menu;   // clk_pixel domain, from HDMI_Interface (SET reg 13): 0 off, 1 SCC, 2 bench test
+    (* ASYNC_REG = "TRUE" *) logic [1:0] serb_dot_int, serb_dot;
+    logic serb_on, serb_bridge;
+    assign serb_on     = serb_dot != 2'd0;
+    assign serb_bridge = serb_dot == 2'd2;
     always_ff @(posedge DOTCK) begin
-        esp_mode_dot_int <= esp_wifi_mode_menu & wifi_present_menu;
+        esp_mode_dot_int <= esp_wifi_mode_menu & wifi_present_menu & (serial_b_wifi_menu == 2'd0);
         esp_mode_dot     <= esp_mode_dot_int;
+        serb_dot_int     <= wifi_present_menu ? serial_b_wifi_menu : 2'd0;
+        serb_dot         <= serb_dot_int;
     end
 
     // What the SCC's channel A actually sees. These replace the Serial A pins on the IO_board connections below.
@@ -773,12 +786,21 @@ module top(
     assign ctsa_core  = esp_mode_dot ? 1'b0 : CTSA;                      // active low: asserted
     assign dcda_core  = esp_mode_dot ? 1'b0 : DCDA;
     assign synca_core = esp_mode_dot ? 1'b0 : SYNCA;                     // DSR, active low: asserted
+    // ...and channel B, for the WiFi board's FujiNet adapter. Channel B has only CTS (shared with its TX clock input,
+    // unused in async mode), held asserted like Serial A's; the physical TXDB is parked at mark -- or, in the bench test,
+    // carries the WiFi board's transmit data, a plain wire with no clock.
+    logic txdb_core, rxdb_core, ctsb_core;
+    assign TXDB       = serb_bridge ? GPIO[3] : serb_on ? 1'b1 : txdb_core;
+    assign rxdb_core  = serb_bridge ? 1'b1 : serb_on ? GPIO[3] : RXDB;
+    assign ctsb_core  = serb_on ? 1'b0 : CTSB_TRXCB;
 
     logic serve_fdd, serve_hdd;                                          // which ESP32 is the SD server
     assign serve_fdd = esp_mode_sys & ~esp_hdd_sys;
     assign serve_hdd = esp_mode_sys &  esp_hdd_sys;
 
-    assign GPIO[2] = esp_mode_dot ? txda_core : 1'bz;                    // Lisa Serial A -> WiFi board
+    assign GPIO[2] = serb_bridge  ? RXDB                                 // the real Serial B port -> WiFi board (bench test)
+                   : serb_on      ? txdb_core                            // Lisa Serial B -> WiFi board (FujiNet)
+                   : esp_mode_dot ? txda_core : 1'bz;                    // Lisa Serial A -> WiFi board (modem)
     // The WiFi board's control channel into the FPGA itself (settings, ESP32 mode, power and reset): it listens on
     // GPIO5 in every mode and replies on GPIO4 once the serving ESP32's TX has been idle a while. See lisanet_ctrl.sv.
     logic        ctrl_tx, ctrl_tx_en;
@@ -848,6 +870,7 @@ module top(
         .esp_target_hdd(esp_target_hdd_menu),
         .wifi_board_line(GPIO[5]),
         .wifi_board_present(wifi_present_menu),
+        .serial_b_wifi(serial_b_wifi_menu),
         .web_req(ctrl_web_req),
         .web_ack(ctrl_web_ack),
         .ctrl_status(ctrl_status),
@@ -1691,11 +1714,11 @@ module top(
         .DCDA(dcda_core),
         .TRXCA(TRXCA),
         .RTXCA(RTXCA),
-        .TXDB(TXDB),
+        .TXDB(txdb_core),     // Serial B goes through the FujiNet mux above: the real port, or the WiFi board
         .DTRB(DTRB),
         .RTSB(RTSB),
-        .RXDB(RXDB),
-        .CTSB_TRXCB(CTSB_TRXCB),
+        .RXDB(rxdb_core),
+        .CTSB_TRXCB(ctsb_core),
         ._CRES_in(_CRES_in),
         ._CRES_out(_CRES_out),
         ._NMI(_NMI_IO),

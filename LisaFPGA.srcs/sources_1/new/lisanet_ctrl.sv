@@ -21,7 +21,9 @@
 //            0x02 SET    u8 reg, u16 value     -> status. reg 1 video mode, 2 H offset, 3 V offset (the live mode's),
 //                                                 4 max contrast, 5 CPU speed (0 = switches, 1-4), 6 ESP32 mode (0-2),
 //                                                 8 scanlines, 9 inverse video, 10 CPU ROM (0 H, 1 3A), 11 I/O ROM
-//                                                 (0 Sony, 1 Twiggy), 12 RAM size (0 = switches, 1-4 = 512K-2MB)
+//                                                 (0 Sony, 1 Twiggy), 12 RAM size (0 = switches, 1-4 = 512K-2MB),
+//                                                 13 Serial B to the WiFi board (0 the real port, 1 J21, 2 bench
+//                                                 test: the real port wired to J21; version 3)
 //            0x03 ACTION u8 action             -> status. 1 save settings, 2 press the power button, 3 press reset,
 //                                                 4 press NMI
 // Status: 0 OK, 1 BAD_REQUEST, 2 LOCKED (regs 10-12, and reg 6 except value 0 = NORMAL, while the Lisa is on),
@@ -44,7 +46,7 @@ module lisanet_ctrl (
     output logic        rst_press = 1'b0,   // level, ~250 ms: a virtual press of the reset button
     output logic        nmi_press = 1'b0    // level, ~250 ms: a virtual press of the NMI button
 );
-    localparam logic [7:0] VERSION     = 8'd2;   // 2: status bytes 11-12, SET regs 8-12, ACTION 4
+    localparam logic [7:0] VERSION     = 8'd3;   // 2: status bytes 11-12, SET regs 8-12, ACTION 4; 3: SET reg 13
     localparam int         REPLY_GUARD = 2500;        // 20 us = 40 bit times of idle on the ESP32's TX first
     localparam int         BYTE_GAP    = 12500;       // 100 us without a byte abandons a half-received frame
     localparam int         ACK_TIMEOUT = 25_000_000;  // 200 ms for HDMI_Interface to take a write (frames are <= 34 ms)
@@ -254,10 +256,12 @@ module lisanet_ctrl (
                     ps <= X_RESPOND;
                     case (cmd)
                         8'h01: ;                                                    // STATUS: just the block
-                        8'h02: if (len != 8'd3 || pay[0] == 8'd0 || pay[0] == 8'd7 || pay[0] > 8'd12) status <= 8'd1;
+                        8'h02: if (len != 8'd3 || pay[0] == 8'd0 || pay[0] == 8'd7 || pay[0] > 8'd13) status <= 8'd1;
                                // Locked while the Lisa is on: the ROMs, RAM size, and ESP32 mode -- except back to
-                               // NORMAL (value 0), which only brings a drive back online and is always safe
-                               else if (((pay[0] == 8'd6 && {pay[2], pay[1]} != 16'd0) || pay[0] >= 8'd10) && lisa_on_snap)
+                               // NORMAL (value 0), which only brings a drive back online and is always safe. Serial B
+                               // (13) is like plugging a cable in, so it is never locked.
+                               else if (((pay[0] == 8'd6 && {pay[2], pay[1]} != 16'd0) || (pay[0] >= 8'd10 && pay[0] <= 8'd12))
+                                        && lisa_on_snap)
                                    status <= 8'd2;
                                else begin
                                    web_req  <= {~web_req[15], pay[0][3:0], pay[2][2:0], pay[1]};

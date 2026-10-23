@@ -115,7 +115,7 @@ control frame only while it has no SD request outstanding, so the ESP32 is silen
 
 | Cmd | Name | Request payload | Reply payload (after status) |
 |---|---|---|---|
-| 0x01 | STATUS | — | `u8 version` (1, or 2 from 2026-10-14), status bytes 0-10, `u16` XADC temperature code (degrees C = code x 503.975 / 65536 - 273.15), then in version 2 status bytes 11-12 (placed last so older WiFi firmware still parses the reply) |
+| 0x01 | STATUS | — | `u8 version` (1, 2 from 2026-10-14, 3 from 2026-10-22), status bytes 0-10, `u16` XADC temperature code (degrees C = code x 503.975 / 65536 - 273.15), then in version 2 status bytes 11-12 (placed last so older WiFi firmware still parses the reply) |
 | 0x02 | SET | `u8 reg`, `u16 value` | — |
 | 0x03 | ACTION | `u8 action`: 1 save settings, 2 press the Lisa's power button, 3 press reset, 4 press NMI (version 2) (each press lasts 250 ms) | — |
 
@@ -128,8 +128,11 @@ SET registers, applied on the next video frame with the on-screen menu's limits 
 6 ESP32 mode (0 NORMAL, 1 WIFI FDD, 2 WIFI HDD; only with the Lisa off). Version 2 adds 8 scanlines, 9 inverse video
 (0/1, the effective setting: the override is whatever makes the jumper read that way), 10 CPU ROM (0 H, 1 3A),
 11 I/O ROM (0 Sony/A8, 1 Twiggy/40), 12 RAM size (0 follow the jumpers, 1-4 = 512K / 1M / 1.5M / 2M); 10-12 only
-with the Lisa off. 7 is reserved (save is ACTION 1). Settings saved from the web keep these in bits 64 and 74-79 of
-the settings block. Like the menu, changes last until power-off
+with the Lisa off. Version 3 adds 13 Serial B (0 its own port, 1 the SCC's channel B to the WiFi board on J21 GPIO2/3 for
+its FujiNet adapter -- taking those wires from the Serial A modem, 2 a bench test that wires the real Serial B port to
+the WiFi board instead; allowed while the Lisa is on, only acted on with a board present). 7 is reserved (save is
+ACTION 1). Settings saved from the web keep these in bits 64 and 74-79 of the settings block, and 13 = 1 in bit 63 (the
+bench test is never saved). Like the menu, changes last until power-off
 unless saved.
 
 Status block (little-endian): 0 resolution; 1 flags (bit 0 max contrast, 1 Lisa on, 2 WiFi board present, 3 ESP32 WIFI,
@@ -137,4 +140,5 @@ Status block (little-endian): 0 resolution; 1 flags (bit 0 max contrast, 1 Lisa 
 3 resolution chosen, 4 3A ROM, 5 MAX CONTRAST jumper; 3-4 H offset, 5-6 H limit, 7-8 V offset, 9-10 V limit.
 Version 2: 11 bit 0 scanlines, 1 SCANLINES jumper, 2 inverse video, 3 INVERSE VIDEO jumper at INV, 4 3A CPU ROM (also
 in byte 2), 5 CPU ROM switch at 3A, 6 Twiggy I/O ROM, 7 I/O ROM switch at Twiggy; 12 bits 0-1 RAM size (0-3 =
-512K-2M), 2-3 the RAM SIZE jumpers, 4 RAM size set from the web. Effective values include the web's overrides.
+512K-2M), 2-3 the RAM SIZE jumpers, 4 RAM size set from the web; version 3: 12 bit 5 Serial B to the WiFi board, 6 the Serial B
+bench test. Effective values include the web's overrides.

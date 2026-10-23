@@ -53,11 +53,18 @@ module HDMI_Interface #(
     // powered and wired, against an XDC pull-down that holds it LOW when nothing is there. No board, no ESP32 MODE row.
     input  logic        wifi_board_line,
     output logic        wifi_board_present = 1'b0,
+    // Serial B to the WiFi board (web page only, SET reg 13), clk_pixel domain: 1 = the SCC's channel B goes to J21
+    // GPIO2/3 instead of the real Serial B port, for the WiFi board's FujiNet adapter; 2 = a bench test: the REAL Serial
+    // B port is wired straight to the WiFi board (the SCC sees an idle line), so a PC on the board's Serial B USB port
+    // can talk to the adapter. top.sv gates it on presence and gives it priority over the Serial A modem (they share
+    // those two wires). Value 1 is saved in settings bit 63 (the top spare bit of v_offset_1024's word, always 0 in
+    // older blocks); the bench test is never saved.
+    output logic [1:0]  serial_b_wifi = 2'd0,
     // The WiFi board's settings writes, from lisanet_ctrl (sysclk domain): {toggle, reg[3:0], value[10:0]}, data held
     // until web_ack follows the toggle. Applied on a frame tick with the same limits and locks as the menu. reg: 1 video
     // mode, 2 H offset, 3 V offset (the live mode's), 4 max contrast, 5 CPU speed (0 = switches, 1-4), 6 ESP32 mode,
     // 7 save settings, 8 scanlines, 9 inverse video, 10 CPU ROM (0 H, 1 3A), 11 I/O ROM (0 Sony/A8, 1 Twiggy/40),
-    // 12 RAM size (0 = switches, 1-4 = 512K-2MB). 10-12 only while the Lisa is off.
+    // 12 RAM size (0 = switches, 1-4 = 512K-2MB), 13 Serial B to the WiFi board. 10-12 only while the Lisa is off.
     input  logic [15:0] web_req,
     output logic        web_ack,
     // The settings and state the WiFi board reads back, 13 bytes, registered; see the packing where it is built
@@ -726,7 +733,7 @@ module HDMI_Interface #(
         settings_save_data <= {
             {lnet_cfg_ram_user_set, lnet_cfg_ram_idx, lnet_cfg_io_rom_ovr, lnet_cfg_cpu_rom_ovr, lnet_cfg_invid_ovr,
              esp_target_hdd, esp_wifi_mode, speed_user_set, speed_idx, 1'b1, video_mode, contrast_override_menu, scanlines_override},
-            {5'b0, v_offset_1024},
+            {serial_b_wifi == 2'd1, 4'b0, v_offset_1024},
             {5'b0, h_offset_1024},
             {5'b0, v_offset_1080p},
             {5'b0, h_offset_1080p}
@@ -793,6 +800,7 @@ module HDMI_Interface #(
                     v_offset_1080p <= settings_data[26:16];
                     h_offset_1024  <= settings_data[42:32];
                     v_offset_1024  <= settings_data[58:48];
+                    serial_b_wifi  <= {1'b0, settings_data[63]};
                     settings_valid_q       <= 1'b1;
                     contrast_override_menu <= settings_data[65];
                     // Bit 72 was the old block's reserved byte, always written as 0, so a block saved before
@@ -985,6 +993,7 @@ module HDMI_Interface #(
                                lnet_cfg_ram_idx      <= web_req[1:0] - 1'b1;
                            end
                        end
+                4'd13: if (web_req[10:0] <= 11'd2) serial_b_wifi <= web_req[1:0];   // any time: like plugging in a cable
                 default: ;
             endcase
         end
@@ -1586,13 +1595,15 @@ module HDMI_Interface #(
     //   3-4    H offset (the live mode's)   5-6  H limit   7-8  V offset   9-10  V limit
     //   11     0 scanlines (effective), 1 SCANLINES jumper, 2 inverse video (effective), 3 INVERSE VIDEO jumper at INV,
     //          4 3A CPU ROM (effective), 5 CPU ROM switch at 3A, 6 Twiggy I/O ROM (effective), 7 I/O ROM switch at Twiggy
-    //   12     1:0 RAM size (effective, 0-3 = 512K-2MB), 3:2 RAM SIZE jumpers, 4 RAM size chosen on the web
+    //   12     1:0 RAM size (effective, 0-3 = 512K-2MB), 3:2 RAM SIZE jumpers, 4 RAM size chosen on the web,
+    //          5 Serial B to the WiFi board (the setting; top.sv only acts on it with a board present),
+    //          6 the Serial B bench test (the real port wired to the WiFi board)
     // (lisanet_ctrl sends bytes 11-12 after the temperature, so WiFi firmware that predates them still parses the reply)
     logic [1:0] ram_eff;
     assign ram_eff = lnet_cfg_ram_user_set ? lnet_cfg_ram_idx : cfg_pins[4:3];
     always_ff @(posedge clk_pixel) begin
         ctrl_status <= {
-            {3'd0, lnet_cfg_ram_user_set, cfg_pins[4:3], ram_eff},
+            {1'b0, serial_b_wifi == 2'd2, serial_b_wifi == 2'd1, lnet_cfg_ram_user_set, cfg_pins[4:3], ram_eff},
             {cfg_pins[2], cfg_pins[2] ^ lnet_cfg_io_rom_ovr, cfg_pins[1], CPU_ROM_SEL,
              cfg_pins[0], cfg_pins[0] ^ lnet_cfg_invid_ovr, scanlines, scanlines_eff},
             {5'd0, v_limit},
