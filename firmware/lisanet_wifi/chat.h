@@ -13,6 +13,7 @@ enum State { IDLE, RUNNING, REPLY };   // REPLY: an answer (or an error written 
 void begin();
 void poll();                           // from loop(): when the task has finished, update the history and go to REPLY
 
+bool enabled();                        // the owner has turned AI chat on (off by default)
 State state();
 
 // Start a question. kind: 0 default provider, 1 Claude, 2 OpenAI (chatcore::Target::Kind order is not used here).
@@ -24,6 +25,6 @@ void resetHistory();                   // chat://reset: forget the conversation 
 
 String infoJson();                     // settings and state, never the keys: {"provider","claudeKey":bool,...}
 bool setConfig(const String &name, const String &value, String &err);   // provider claudeKey openaiKey claudeModel
-                                       // openaiModel maxTokens turns system verify; kept in NVS at once
+                                       // openaiModel maxTokens turns system verify enabled; kept in NVS at once
 
 }  // namespace chat

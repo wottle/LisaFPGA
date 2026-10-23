@@ -192,7 +192,7 @@ from.
 On the FujiNet's network units the board also offers a chat endpoint, so a Lisa program can talk to Claude or ChatGPT with
 the same calls it uses to fetch a web page. The board keeps the API keys; the Lisa never sees them.
 
-**Setting it up:** on the Settings tab, in the *AI chat* card, enter an API key for Claude and/or OpenAI, check the model
+**Setting it up:** AI chat is **off by default**: while it is off nothing is ever sent to an AI service, and a Lisa program that opens `chat://` gets `[error: AI chat is turned off ...]`. On the Settings tab, in the *AI chat* card, tick *Enable AI chat*, then enter an API key for Claude and/or OpenAI, check the model
 names (Claude defaults to `claude-sonnet-5-5`; the OpenAI default `gpt-4o-mini` is only a placeholder, so use a model your
 account has), and press *Save chat settings*. These are kept at once. *Try it* asks one question outside the Lisa's
 conversation, which is the quickest way to check a key and model.

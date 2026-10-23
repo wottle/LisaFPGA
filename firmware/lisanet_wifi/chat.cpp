@@ -20,6 +20,7 @@ static const uint32_t HTTP_TIMEOUT_MS = 70000;    // per read; a model may think
 static Preferences nvs;
 static String keyClaude, keyOpenai, modelClaude, modelOpenai, systemPrompt, defaultProvider;
 static int maxTokens = 600, historyTurns = 12;
+static bool enabledFlag = false;                  // off until the owner turns it on on the web page
 static bool verifyTls = true;                     // check the API servers' certificates against CHAT_ROOTS
 
 static const char *DEFAULT_SYSTEM =
@@ -54,7 +55,10 @@ void begin() {
     maxTokens = nvs.getInt("maxtok", 600);
     historyTurns = nvs.getInt("turns", 12);
     verifyTls = nvs.getBool("verify", true);
+    enabledFlag = nvs.getBool("enabled", false);
 }
+
+bool enabled() { return enabledFlag; }
 
 State state() {
     int s = st;
@@ -169,6 +173,11 @@ static void chatTask(void *) {
 
 bool start(int kind, const std::string &prompt, bool remember) {
     if (st != IDLE) return false;
+    if (!enabledFlag) {
+        replyText = "[error: AI chat is turned off. Turn it on at http://" MDNS_NAME ".local/ under AI chat.]";
+        st = REPLY;
+        return true;
+    }
     int provider = kind == CLAUDE || kind == OPENAI ? kind : (defaultProvider == "openai" ? OPENAI : CLAUDE);
     const String &key = provider == CLAUDE ? keyClaude : keyOpenai;
     const char *name = provider == CLAUDE ? "Claude" : "OpenAI";
@@ -235,7 +244,7 @@ static String jesc(const String &s) {
 }
 
 String infoJson() {
-    String o = "{\"provider\":\"" + defaultProvider + "\",\"claudeKey\":" + (keyClaude.length() ? "true" : "false") +
+    String o = String("{\"enabled\":") + (enabledFlag ? "true" : "false") + ",\"provider\":\"" + defaultProvider + "\",\"claudeKey\":" + (keyClaude.length() ? "true" : "false") +
                ",\"openaiKey\":" + (keyOpenai.length() ? "true" : "false") + ",\"claudeModel\":\"" + jesc(modelClaude) +
                "\",\"openaiModel\":\"" + jesc(modelOpenai) + "\",\"maxTokens\":" + maxTokens + ",\"turns\":" + historyTurns +
                ",\"system\":\"" + jesc(systemPrompt) + "\",\"verify\":" + (verifyTls ? "true" : "false") + ",\"state\":\"" +
@@ -267,6 +276,9 @@ bool setConfig(const String &name, const String &raw, String &err) {
         long n = v.toInt();
         if (n < 2 || n > 40) { err = "history is 2 to 40 turns"; return false; }
         historyTurns = n; nvs.putInt("turns", historyTurns);
+    } else if (name == "enabled") {
+        enabledFlag = v == "1" || v == "true"; nvs.putBool("enabled", enabledFlag);
+        if (!enabledFlag) resetHistory();
     } else if (name == "verify") {
         verifyTls = v == "1" || v == "true"; nvs.putBool("verify", verifyTls);
     } else if (name == "system") {

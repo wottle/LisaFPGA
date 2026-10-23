@@ -103,6 +103,8 @@ kept across a power cycle only after Save settings.</div>
 <div class="row"><span class="mut" id="fnStat"></span></div>
 <pre id="fnLog" class="mut" style="white-space:pre-wrap;font-size:12px;margin:4px 0 0"></pre></div>
 <div class="card sb" hidden><h3>AI chat (for Lisa programs)</h3>
+<div class="row"><label class="k" for="chEnable">AI chat</label><label><input type="checkbox" id="chEnable"> Enable AI chat</label><span class="mut">off by default</span></div>
+<div id="chBody" hidden>
 <div class="row"><label class="k" for="chProv">Default</label><select id="chProv"><option value="claude">Claude</option><option value="openai">OpenAI</option></select>
 <span class="mut">used for chat:// ; chat://claude and chat://openai choose one</span></div>
 <div class="row"><label class="k" for="chCKey">Claude key</label><input id="chCKey" type="password" size="30" autocomplete="off" placeholder="sk-ant-..."><span class="mut" id="chCSet"></span></div>
@@ -116,9 +118,10 @@ kept across a power cycle only after Save settings.</div>
 <div class="row"><button id="chSave">Save chat settings</button><button id="chReset">Forget the conversation</button><span class="mut" id="chStat"></span></div>
 <div class="row"><label class="k" for="chText">Try it</label><input id="chText" size="40" placeholder="Ask something"><button id="chAsk">Ask</button></div>
 <pre id="chOut" class="mut" style="white-space:pre-wrap;font-size:12px;margin:4px 0 0"></pre>
+</div>
 <div class="mut">A Lisa program opens chat://claude or chat://openai on a network unit, writes a question and reads the answer, as plain
 ASCII. The WiFi board keeps the API keys (blank leaves a key as it is; the page never shows one), the settings and the conversation.
-These are kept at once, without Save settings. The HTTPS connections check the providers' certificates against Google Trust Services roots built into the firmware.</div></div>
+AI chat is off unless you turn it on here; while it is off, nothing is ever sent to an AI service. These are kept at once, without Save settings. The HTTPS connections check the providers' certificates against Google Trust Services roots built into the firmware.</div></div>
 <div class="bar"><button id="bSave">Save settings</button><span class="mut" id="sSaved"></span></div>
 <p class="mut">Changes apply at once, as in the on-screen menu, and are kept across a power cycle only after Save settings.</p>
 <div class="card"><h3>WiFi board firmware</h3>
@@ -300,7 +303,7 @@ async function fnset(q){await fdo(async()=>{fnshow(await fpga('/api/fujinet?'+q,
 // AI chat card: settings in the board's NVS, and a one-off test question
 let chLoaded=false,chTimer=null;
 function chShow(i){const f=(id,v)=>{if(document.activeElement!==$(id))$(id).value=v;};
- f('chProv',i.provider);f('chCModel',i.claudeModel);f('chOModel',i.openaiModel);f('chTok',i.maxTokens);f('chTurns',i.turns);f('chSys',i.system);$('chVerify').checked=i.verify;
+ f('chProv',i.provider);f('chCModel',i.claudeModel);f('chOModel',i.openaiModel);f('chTok',i.maxTokens);f('chTurns',i.turns);f('chSys',i.system);$('chVerify').checked=i.verify;$('chEnable').checked=i.enabled;$('chBody').hidden=!i.enabled;
  $('chCKey').placeholder=i.claudeKey?'(set - leave blank to keep)':'sk-ant-...';$('chOKey').placeholder=i.openaiKey?'(set - leave blank to keep)':'sk-...';
  $('chCSet').textContent=i.claudeKey?'key set':'no key';$('chOSet').textContent=i.openaiKey?'key set':'no key';
  $('chStat').textContent='Conversation: Claude '+i.claudeTurns+', OpenAI '+i.openaiTurns+' messages'+(i.last?' - last: '+i.last:'');chLoaded=true;}
@@ -310,6 +313,8 @@ $('chSave').onclick=()=>fdo(async()=>{const b=new URLSearchParams();
  b.set('maxTokens',$('chTok').value);b.set('turns',$('chTurns').value);b.set('system',$('chSys').value);b.set('verify',$('chVerify').checked?'1':'0');
  if($('chCKey').value.trim())b.set('claudeKey',$('chCKey').value);if($('chOKey').value.trim())b.set('openaiKey',$('chOKey').value);
  chShow(await fpga('/api/chat/config',{method:'POST',body:b}));$('chCKey').value='';$('chOKey').value='';msg('Chat settings saved.');});
+$('chEnable').onchange=()=>fdo(async()=>{const b=new URLSearchParams();b.set('enabled',$('chEnable').checked?'1':'0');
+ chShow(await fpga('/api/chat/config',{method:'POST',body:b}));});
 $('chReset').onclick=()=>fdo(async()=>{chShow(await fpga('/api/chat/reset',{method:'POST'}));});
 $('chAsk').onclick=()=>fdo(async()=>{const b=new URLSearchParams();b.set('provider',$('chProv').value);b.set('text',$('chText').value);
  await fpga('/api/chat/test',{method:'POST',body:b});$('chOut').textContent='Thinking...';clearInterval(chTimer);

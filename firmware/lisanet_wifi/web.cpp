@@ -30,7 +30,7 @@
 //   GET  /api/chat                  the AI chat endpoint (chat.cpp, for Lisa programs opening chat://claude or chat://openai):
 //                                   its settings, without the keys, and {"state":"idle|running|reply"}
 //   POST /api/chat/config           form fields: any of provider claudeKey openaiKey claudeModel openaiModel maxTokens
-//                                   turns system verify; kept at once
+//                                   turns system verify enabled; kept at once
 //   POST /api/chat/test             form fields: provider (claude|openai), text; asks one question outside the Lisa's
 //                                   conversation ({"started":true}, 409 if busy)
 //   GET  /api/chat/test             {"state","reply"}: the answer once state is "reply" (read once)
@@ -483,7 +483,7 @@ static void handleChatInfo() {
 
 static void handleChatConfig() {
     if (!authorized()) return;
-    static const char *names[] = {"provider", "claudeKey", "openaiKey", "claudeModel", "openaiModel", "maxTokens", "turns", "system", "verify"};
+    static const char *names[] = {"provider", "claudeKey", "openaiKey", "claudeModel", "openaiModel", "maxTokens", "turns", "system", "verify", "enabled"};
     for (const char *n : names) {
         if (!server.hasArg(n)) continue;
         String err;
@@ -497,6 +497,10 @@ static void handleChatConfig() {
 
 static void handleChatTestStart() {
     if (!authorized()) return;
+    if (!chat::enabled()) {
+        server.send(403, "application/json", "{\"error\":\"AI chat is turned off. Tick Enable AI chat first.\"}");
+        return;
+    }
     String text = server.arg("text");
     text.trim();
     if (!text.length() || text.length() > 1000) {
