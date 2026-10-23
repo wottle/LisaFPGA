@@ -412,8 +412,9 @@ static cJSON *jsonPointer(cJSON *root, const String &q) {
     return it;
 }
 
-// A chat:// unit: the first STATUS or READ hands the question (what WRITE collected) to chat.cpp, which answers on a task
-// of its own; until then STATUS says 0 bytes waiting but still connected, so the Lisa keeps polling. The answer is plain
+// A chat:// unit: the first STATUS or READ after a WRITE hands the question (what WRITE collected) to chat.cpp, which
+// answers on a task of its own; before the WRITE, and until the answer is ready, STATUS says 0 bytes waiting but still
+// connected, so the Lisa keeps polling. The answer is plain
 // ASCII with \n line ends, translated to the unit's line ending like any other text.
 static void chatPump(Unit &u, int n) {
     auto fail = [&](const char *why) {
@@ -424,7 +425,7 @@ static void chatPump(Unit &u, int n) {
         std::string q = u.tx;
         u.tx.clear();
         while (!q.empty() && (q.back() == '\r' || q.back() == '\n')) q.pop_back();
-        if (q.empty()) { fail("nothing was written before reading"); return; }
+        if (q.empty()) return;          // LisaFuji's FnNOpen sends a STATUS right after the OPEN, before any WRITE: wait
         if (!chat::start(u.chatKind, q, true)) { fail("the chat is busy with another question"); return; }
         u.chatAsked = u.performed = true;
         logf("N%d: chat question, %u characters", n, (unsigned)q.size());

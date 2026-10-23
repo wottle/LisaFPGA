@@ -22,11 +22,11 @@
 #pragma once
 
 #ifndef LISANET_WIFI_VERSION         // a test build can override it with -D
-#define LISANET_WIFI_VERSION "0.14"
+#define LISANET_WIFI_VERSION "0.15"
 #endif
 // What this version brought, shown next to the version on the web page. Rewrite it with every new version.
 #ifndef LISANET_WIFI_NOTES
-#define LISANET_WIFI_NOTES   "AI chat has an Enable switch, off by default"
+#define LISANET_WIFI_NOTES   "AI chat works with the STATUS that follows an OPEN"
 #endif
 
 #define LISA_RX_PIN   1        // D0

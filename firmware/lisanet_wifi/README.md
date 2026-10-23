@@ -201,7 +201,7 @@ conversation, which is the quickest way to check a key and model.
 
 | Step | FujiNet call | Notes |
 |---|---|---|
-| open | `OPEN` with the URL `chat://claude`, `chat://openai` or `chat://` (the default provider) | any open mode |
+| open | `OPEN` with the URL `chat://claude`, `chat://openai` or `chat://` (the default provider) | any open mode. A STATUS straight after the OPEN, as LisaFuji's FnNOpen sends, is fine: it reports connected, 0 bytes, and sends nothing |
 | ask | `WRITE` the question as text | one or more writes; trailing CR/LF is ignored |
 | wait | `STATUS` until bytes are waiting | the first STATUS (or READ) sends the question. While the model thinks, STATUS says 0 bytes waiting and *connected*; an answer ends with *not connected* and the bytes waiting. Expect 2-30 s. |
 | read | `READ` | plain ASCII; line ends follow the unit's translation setting (SET_EOL / TRANSLATION), `\n` with none |
