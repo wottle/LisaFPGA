@@ -97,6 +97,23 @@ static std::string apiErrorMessage(const String &json) {      // {"error":{"mess
     return m;
 }
 
+// A sink for HTTPClient::writeToStream (which also decodes chunked bodies) that refuses bytes past a cap, so a reply with
+// no Content-Length cannot fill the heap
+class CapSink : public Stream {
+public:
+    String body;
+    bool over = false;
+    size_t write(uint8_t c) override { return write(&c, 1); }
+    size_t write(const uint8_t *b, size_t n) override {
+        if (body.length() + n > MAX_RESPONSE) { over = true; return 0; }
+        body.concat((const char *)b, n);
+        return n;
+    }
+    int available() override { return 0; }
+    int read() override { return -1; }
+    int peek() override { return -1; }
+};
+
 static void chatTask(void *) {
     Job &j = job;
     WiFiClientSecure client;
@@ -118,8 +135,11 @@ static void chatTask(void *) {
         if (code <= 0) err = String("no connection (") + http.errorToString(code) + ")";
         else if (http.getSize() > (int)MAX_RESPONSE) err = "the reply was too large";
         else {
-            String resp = http.getString();
-            if (code >= 200 && code < 300) {
+            CapSink sink;
+            http.writeToStream(&sink);
+            String resp = sink.body;
+            if (sink.over) err = "the reply was too large";
+            else if (code >= 200 && code < 300) {
                 std::string text, why;
                 if (extractReply(j.provider, resp, text, why)) { j.ok = true; j.text = chatcore::asciify(text); }
                 else err = why.c_str();
