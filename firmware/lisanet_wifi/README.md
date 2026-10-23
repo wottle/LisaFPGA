@@ -187,6 +187,41 @@ can stand in for the Lisa: `tools/lisanet_client/fujinet_test.ps1 -Port COMn` on
 port. The board's SERIAL B SOURCE switch must be at USB for that, since it chooses where Serial B's receive line comes
 from.
 
+## AI chat for Lisa programs (chat://)
+
+On the FujiNet's network units the board also offers a chat endpoint, so a Lisa program can talk to Claude or ChatGPT with
+the same calls it uses to fetch a web page. The board keeps the API keys; the Lisa never sees them.
+
+**Setting it up:** on the Settings tab, in the *AI chat* card, enter an API key for Claude and/or OpenAI, check the model
+names (Claude defaults to `claude-sonnet-5-5`; the OpenAI default `gpt-4o-mini` is only a placeholder, so use a model your
+account has), and press *Save chat settings*. These are kept at once. *Try it* asks one question outside the Lisa's
+conversation, which is the quickest way to check a key and model.
+
+**What a Lisa program does** (N: unit, any of N1-N8):
+
+| Step | FujiNet call | Notes |
+|---|---|---|
+| open | `OPEN` with the URL `chat://claude`, `chat://openai` or `chat://` (the default provider) | any open mode |
+| ask | `WRITE` the question as text | one or more writes; trailing CR/LF is ignored |
+| wait | `STATUS` until bytes are waiting | the first STATUS (or READ) sends the question. While the model thinks, STATUS says 0 bytes waiting and *connected*; an answer ends with *not connected* and the bytes waiting. Expect 2-30 s. |
+| read | `READ` | plain ASCII; line ends follow the unit's translation setting (SET_EOL / TRANSLATION), `\n` with none |
+| close | `CLOSE` | ask the next question with a new `OPEN` |
+
+`chat://reset` forgets the conversation: open it, read `OK`, close. Each provider has its own conversation, kept in RAM
+(the last *Memory* messages, 6000 bytes at most) and lost on a restart. Only one question runs at a time; a second one gets
+`[error: the chat is busy with another question]`.
+
+Errors come back as the answer text, in square brackets, so a Lisa program needs no separate error path: `[error: no
+Claude API key set ...]`, `[error: HTTP 401, check the API key]`, `[error: no connection (...)]`, and so on.
+
+The answer is converted to ASCII: curly quotes, dashes, bullets and accented Latin letters become plain ones, emoji and other
+scripts are dropped, markdown marks (`**`, `` ` ``, `#`, `* `) are removed. The default instructions also ask the model for
+short plain text; change them on the page. The HTTPS connection does not check the server's certificate (no certificate
+store here), so the key travels over an unverified TLS session; the same is true of every HTTPS fetch on the FujiNet.
+
+Host tests for the conversion, history and request code: `g++ -std=c++17 -Wall -I.. test/test_chatcore.cpp chatcore.cpp -o
+/tmp/test_chatcore && /tmp/test_chatcore` from this folder (`chat.cpp` is the part that needs the board).
+
 ## Updating over WiFi
 
 On the Settings tab, **WiFi board firmware -> Install update...**, and choose `lisanet_wifi.ino.bin` from the build

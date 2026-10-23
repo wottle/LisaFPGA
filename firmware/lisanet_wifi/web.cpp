@@ -27,6 +27,14 @@
 //   GET  /api/fujinet               the FujiNet adapter on Serial B: {"routed","baud","tz","time","packets","naks","log"}
 //                                   (Serial B itself is switched with /api/fpga/set?reg=13)
 //   POST /api/fujinet?baud=&tz=     its baud rate and POSIX time zone
+//   GET  /api/chat                  the AI chat endpoint (chat.cpp, for Lisa programs opening chat://claude or chat://openai):
+//                                   its settings, without the keys, and {"state":"idle|running|reply"}
+//   POST /api/chat/config           form fields: any of provider claudeKey openaiKey claudeModel openaiModel maxTokens
+//                                   turns system; kept at once
+//   POST /api/chat/test             form fields: provider (claude|openai), text; asks one question outside the Lisa's
+//                                   conversation ({"started":true}, 409 if busy)
+//   GET  /api/chat/test             {"state","reply"}: the answer once state is "reply" (read once)
+//   POST /api/chat/reset            forget the Lisa's conversation
 //   GET  /api/drive                 the floppy drive (ESFloppy's drive firmware, NORMAL mode): {"twiggy","uiBusy",
 //                                   "drives":[{"n","exists","inserted","ejecting","name"},..],"fw"}; 503 if it does not answer
 //   GET  /api/drive/ls?path=        folders and images that drive mode accepts, as /api/ls
@@ -51,6 +59,7 @@
 #include "fpgactl.h"
 #include "ota.h"
 #include "fujinet.h"
+#include "chat.h"
 
 namespace web {
 
@@ -467,6 +476,58 @@ static void handleFujinetSet() {
     server.send(200, "application/json", fujinet::infoJson());
 }
 
+static void handleChatInfo() {
+    if (!authorized()) return;
+    server.send(200, "application/json", chat::infoJson());
+}
+
+static void handleChatConfig() {
+    if (!authorized()) return;
+    static const char *names[] = {"provider", "claudeKey", "openaiKey", "claudeModel", "openaiModel", "maxTokens", "turns", "system"};
+    for (const char *n : names) {
+        if (!server.hasArg(n)) continue;
+        String err;
+        if (!chat::setConfig(n, server.arg(n), err)) {
+            server.send(400, "application/json", "{\"error\":\"" + jsonEscape(err) + "\"}");
+            return;
+        }
+    }
+    server.send(200, "application/json", chat::infoJson());
+}
+
+static void handleChatTestStart() {
+    if (!authorized()) return;
+    String text = server.arg("text");
+    text.trim();
+    if (!text.length() || text.length() > 1000) {
+        server.send(400, "application/json", "{\"error\":\"Type a question (up to 1000 characters)\"}");
+        return;
+    }
+    int kind = server.arg("provider") == "openai" ? 2 : 1;
+    if (!chat::start(kind, text.c_str(), false)) {
+        server.send(409, "application/json", "{\"error\":\"The chat is busy with another question\"}");
+        return;
+    }
+    server.send(200, "application/json", "{\"started\":true}");
+}
+
+static void handleChatTestPoll() {
+    if (!authorized()) return;
+    chat::State s = chat::state();
+    if (s == chat::REPLY) {
+        std::string r = chat::takeReply();
+        server.send(200, "application/json", "{\"state\":\"reply\",\"reply\":\"" + jsonEscape(String(r.c_str())) + "\"}");
+        return;
+    }
+    server.send(200, "application/json", String("{\"state\":\"") + (s == chat::RUNNING ? "running" : "idle") + "\"}");
+}
+
+static void handleChatReset() {
+    if (!authorized()) return;
+    chat::resetHistory();
+    server.send(200, "application/json", chat::infoJson());
+}
+
 static void handleFpgaAction() {
     if (!authorized()) return;
     String a = server.arg("a");
@@ -587,6 +648,11 @@ void begin() {
     server.on("/api/fpga/action", HTTP_POST, handleFpgaAction);
     server.on("/api/fujinet", HTTP_GET, handleFujinetInfo);
     server.on("/api/fujinet", HTTP_POST, handleFujinetSet);
+    server.on("/api/chat", HTTP_GET, handleChatInfo);
+    server.on("/api/chat/config", HTTP_POST, handleChatConfig);
+    server.on("/api/chat/test", HTTP_POST, handleChatTestStart);
+    server.on("/api/chat/test", HTTP_GET, handleChatTestPoll);
+    server.on("/api/chat/reset", HTTP_POST, handleChatReset);
     server.on("/api/drive", HTTP_GET, handleDriveStatus);
     server.on("/api/drive/ls", HTTP_GET, handleDriveLs);
     server.on("/api/drive/insert", HTTP_POST, handleDriveInsert);

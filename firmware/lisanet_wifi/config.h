@@ -22,11 +22,11 @@
 #pragma once
 
 #ifndef LISANET_WIFI_VERSION         // a test build can override it with -D
-#define LISANET_WIFI_VERSION "0.11"
+#define LISANET_WIFI_VERSION "0.12"
 #endif
 // What this version brought, shown next to the version on the web page. Rewrite it with every new version.
 #ifndef LISANET_WIFI_NOTES
-#define LISANET_WIFI_NOTES   "Manage ESFloppy / ESProFile files; Files tab only then"
+#define LISANET_WIFI_NOTES   "AI chat for Lisa programs: chat://claude and chat://openai"
 #endif
 
 #define LISA_RX_PIN   1        // D0

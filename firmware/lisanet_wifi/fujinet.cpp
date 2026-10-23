@@ -19,6 +19,8 @@
 #include <time.h>
 #include <sys/time.h>
 #include "cJSON.h"
+#include "chat.h"
+#include "chatcore.h"
 
 namespace fujinet {
 
@@ -277,6 +279,9 @@ struct Unit {
     NetworkClient *stream = nullptr;
     int32_t remaining = -1;         // body bytes still to come, -1 when the server did not say
     cJSON *root = nullptr;
+    bool chat = false;              // a chat:// unit (chat.cpp): WRITE collects the question, STATUS/READ deliver the answer
+    int chatKind = 0;               // 0 default provider, 1 Claude, 2 OpenAI
+    bool chatAsked = false;         // the question has been handed to chat.cpp
 };
 static Unit units[8];
 
@@ -407,6 +412,32 @@ static cJSON *jsonPointer(cJSON *root, const String &q) {
     return it;
 }
 
+// A chat:// unit: the first STATUS or READ hands the question (what WRITE collected) to chat.cpp, which answers on a task
+// of its own; until then STATUS says 0 bytes waiting but still connected, so the Lisa keeps polling. The answer is plain
+// ASCII with \n line ends, translated to the unit's line ending like any other text.
+static void chatPump(Unit &u, int n) {
+    auto fail = [&](const char *why) {
+        u.chatAsked = u.performed = u.done = true;
+        u.rx = std::string("[error: ") + why + "]" + (u.trans >= 1 && u.trans <= 3 ? u.eol : std::string("\n"));
+    };
+    if (!u.chatAsked) {
+        std::string q = u.tx;
+        u.tx.clear();
+        while (!q.empty() && (q.back() == '\r' || q.back() == '\n')) q.pop_back();
+        if (q.empty()) { fail("nothing was written before reading"); return; }
+        if (!chat::start(u.chatKind, q, true)) { fail("the chat is busy with another question"); return; }
+        u.chatAsked = u.performed = true;
+        logf("N%d: chat question, %u characters", n, (unsigned)q.size());
+    }
+    if (!u.done && chat::state() == chat::REPLY) {
+        std::string r = chat::takeReply() + "\n";
+        if (u.trans >= 1 && u.trans <= 3) replaceAll(r, "\n", u.eol);
+        u.rx += r;
+        u.done = true;
+        logf("N%d: chat answer, %u bytes", n, (unsigned)r.size());
+    }
+}
+
 static void netDevice(const Packet &pk) {
     int n = pk.device - DEV_NET_FIRST + 1;
     Unit &u = units[n - 1];
@@ -416,6 +447,23 @@ static void netDevice(const Packet &pk) {
             u.url = cleanUrl(pk.str());
             u.mode = pk.p(0);
             u.trans = pk.p(1) & 0x03;
+            chatcore::Target target;
+            if (chatcore::parseTarget(pk.str().c_str(), target)) {
+                u.chat = true;
+                u.open = true;
+                u.method = "CHAT";
+                if (target.kind == chatcore::Target::RESET) {   // chat://reset: forget the conversation, answer "OK"
+                    chat::resetHistory();
+                    u.chatAsked = u.performed = u.done = true;
+                    u.rx = "OK" + (u.trans >= 1 && u.trans <= 3 ? u.eol : std::string("\n"));
+                } else {
+                    if (chat::state() == chat::REPLY) chat::takeReply();   // nobody claimed the last answer
+                    u.chatKind = target.kind == chatcore::Target::CLAUDE ? 1 : target.kind == chatcore::Target::OPENAI ? 2 : 0;
+                }
+                logf("N%d: OPEN %s (chat)", n, pk.str().c_str());
+                ack(pk);
+                break;
+            }
             if (!u.url.startsWith("http://") && !u.url.startsWith("https://")) {
                 logf("N%d: OPEN %s -> only http:// and https:// are supported here", n, u.url.c_str());
                 u.err = ST_NOT_IMPLEMENTED;
@@ -441,7 +489,12 @@ static void netDevice(const Packet &pk) {
         case 0x53: {                                    // STATUS: bytes waiting (u16), connected, error
             uint16_t avail = 0;
             uint8_t conn = 0, err = u.err;
-            if (u.open) {
+            if (u.open && u.chat) {
+                chatPump(u, n);
+                avail = min(u.rx.size(), (size_t)65535);
+                conn = u.done ? 0 : 1;
+                err = (avail == 0 && u.done) ? ST_EOF : ST_SUCCESS;
+            } else if (u.open) {
                 if (u.json && u.root) {                 // after a QUERY, rx holds its answer
                     avail = min(u.rx.size(), (size_t)65535);
                     conn = 1;
@@ -461,7 +514,8 @@ static void netDevice(const Packet &pk) {
         case 0x52: {                                    // READ: u16 count
             size_t want = pk.p(0);
             if (!u.open || !want) { nak(pk); return; }
-            if (!(u.json && u.root)) { perform(u, n); pull(u); }
+            if (u.chat) chatPump(u, n);
+            else if (!(u.json && u.root)) { perform(u, n); pull(u); }
             size_t give = min(want, u.rx.size());
             if (!give) { nak(pk); return; }
             ack(pk, (const uint8_t *)u.rx.data(), give);
@@ -477,7 +531,7 @@ static void netDevice(const Packet &pk) {
             break;
         }
         case 0x43:                                      // CLOSE: a write that was never read back is sent now
-            if (u.open && !u.performed && u.method != "GET") perform(u, n);
+            if (u.open && !u.chat && !u.performed && u.method != "GET") perform(u, n);
             reset(u);
             ack(pk);
             break;

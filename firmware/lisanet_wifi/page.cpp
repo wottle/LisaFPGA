@@ -102,6 +102,22 @@ again. The time zone is in POSIX form (e.g. EST5EDT,M3.2.0,M11.1.0). Like the ot
 kept across a power cycle only after Save settings.</div>
 <div class="row"><span class="mut" id="fnStat"></span></div>
 <pre id="fnLog" class="mut" style="white-space:pre-wrap;font-size:12px;margin:4px 0 0"></pre></div>
+<div class="card sb" hidden><h3>AI chat (for Lisa programs)</h3>
+<div class="row"><label class="k" for="chProv">Default</label><select id="chProv"><option value="claude">Claude</option><option value="openai">OpenAI</option></select>
+<span class="mut">used for chat:// ; chat://claude and chat://openai choose one</span></div>
+<div class="row"><label class="k" for="chCKey">Claude key</label><input id="chCKey" type="password" size="30" autocomplete="off" placeholder="sk-ant-..."><span class="mut" id="chCSet"></span></div>
+<div class="row"><label class="k" for="chCModel">Claude model</label><input id="chCModel" size="30"></div>
+<div class="row"><label class="k" for="chOKey">OpenAI key</label><input id="chOKey" type="password" size="30" autocomplete="off" placeholder="sk-..."><span class="mut" id="chOSet"></span></div>
+<div class="row"><label class="k" for="chOModel">OpenAI model</label><input id="chOModel" size="30"></div>
+<div class="row"><label class="k" for="chTok">Reply length</label><input id="chTok" type="number" min="16" max="4000" style="width:80px"><span class="mut">tokens at most</span></div>
+<div class="row"><label class="k" for="chTurns">Memory</label><input id="chTurns" type="number" min="2" max="40" style="width:80px"><span class="mut">messages kept per conversation</span></div>
+<div class="row"><label class="k" for="chSys">Instructions</label><textarea id="chSys" rows="3" cols="46" maxlength="600"></textarea></div>
+<div class="row"><button id="chSave">Save chat settings</button><button id="chReset">Forget the conversation</button><span class="mut" id="chStat"></span></div>
+<div class="row"><label class="k" for="chText">Try it</label><input id="chText" size="40" placeholder="Ask something"><button id="chAsk">Ask</button></div>
+<pre id="chOut" class="mut" style="white-space:pre-wrap;font-size:12px;margin:4px 0 0"></pre>
+<div class="mut">A Lisa program opens chat://claude or chat://openai on a network unit, writes a question and reads the answer, as plain
+ASCII. The WiFi board keeps the API keys (blank leaves a key as it is; the page never shows one), the settings and the conversation.
+These are kept at once, without Save settings. Replies come over HTTPS without checking the server's certificate.</div></div>
 <div class="bar"><button id="bSave">Save settings</button><span class="mut" id="sSaved"></span></div>
 <p class="mut">Changes apply at once, as in the on-screen menu, and are kept across a power cycle only after Save settings.</p>
 <div class="card"><h3>WiFi board firmware</h3>
@@ -272,7 +288,7 @@ function render(s){
  $('sMachNote').textContent=s.lisaOn?'Locked while the Lisa is on. Shut it down first.':MACHNOTE;}
 // An FPGA without the control channel can't say which mode it is in: then the Files tab stays available, as before.
 async function frefresh(){try{const s=await fpga('/api/fpga');fst=s;render(s);}catch(e){msg(e.message,1);$('tabF').hidden=false;}drefresh();
- if(fst&&fst.version>=3)fninfo();}
+ if(fst&&fst.version>=3){fninfo();if(!chLoaded)chinfo();}}
 // FujiNet card: the adapter's own settings and what the Lisa has been asking for
 function fnshow(i){if(document.activeElement!==$('fnBaud'))$('fnBaud').value=i.baud;if(document.activeElement!==$('fnTz'))$('fnTz').value=i.tz;
  $('fnTime').textContent=i.time+(i.unsaved?'  (baud rate or time zone not saved yet)':'');
@@ -280,6 +296,24 @@ function fnshow(i){if(document.activeElement!==$('fnBaud'))$('fnBaud').value=i.b
  $('fnLog').textContent=i.log.slice().reverse().join('\n');}
 async function fninfo(){try{fnshow(await fpga('/api/fujinet'));}catch(e){}}
 async function fnset(q){await fdo(async()=>{fnshow(await fpga('/api/fujinet?'+q,{method:'POST'}));});}
+// AI chat card: settings in the board's NVS, and a one-off test question
+let chLoaded=false,chTimer=null;
+function chShow(i){const f=(id,v)=>{if(document.activeElement!==$(id))$(id).value=v;};
+ f('chProv',i.provider);f('chCModel',i.claudeModel);f('chOModel',i.openaiModel);f('chTok',i.maxTokens);f('chTurns',i.turns);f('chSys',i.system);
+ $('chCKey').placeholder=i.claudeKey?'(set - leave blank to keep)':'sk-ant-...';$('chOKey').placeholder=i.openaiKey?'(set - leave blank to keep)':'sk-...';
+ $('chCSet').textContent=i.claudeKey?'key set':'no key';$('chOSet').textContent=i.openaiKey?'key set':'no key';
+ $('chStat').textContent='Conversation: Claude '+i.claudeTurns+', OpenAI '+i.openaiTurns+' messages'+(i.last?' - last: '+i.last:'');chLoaded=true;}
+async function chinfo(){try{chShow(await fpga('/api/chat'));}catch(e){}}
+$('chSave').onclick=()=>fdo(async()=>{const b=new URLSearchParams();
+ b.set('provider',$('chProv').value);b.set('claudeModel',$('chCModel').value);b.set('openaiModel',$('chOModel').value);
+ b.set('maxTokens',$('chTok').value);b.set('turns',$('chTurns').value);b.set('system',$('chSys').value);
+ if($('chCKey').value.trim())b.set('claudeKey',$('chCKey').value);if($('chOKey').value.trim())b.set('openaiKey',$('chOKey').value);
+ chShow(await fpga('/api/chat/config',{method:'POST',body:b}));$('chCKey').value='';$('chOKey').value='';msg('Chat settings saved.');});
+$('chReset').onclick=()=>fdo(async()=>{chShow(await fpga('/api/chat/reset',{method:'POST'}));});
+$('chAsk').onclick=()=>fdo(async()=>{const b=new URLSearchParams();b.set('provider',$('chProv').value);b.set('text',$('chText').value);
+ await fpga('/api/chat/test',{method:'POST',body:b});$('chOut').textContent='Thinking...';clearInterval(chTimer);
+ chTimer=setInterval(async()=>{try{const r=await fpga('/api/chat/test');if(r.state==='reply'){clearInterval(chTimer);$('chOut').textContent=r.reply;}
+  else if(r.state==='idle'){clearInterval(chTimer);$('chOut').textContent='(no answer)';}}catch(e){clearInterval(chTimer);$('chOut').textContent=e.message;}},1000);});
 // Settings is the first tab; #files in the address keeps the Files tab across a reload. Card space (a slow FAT scan
 // on ESFloppy) is read the first time Files is shown.
 // While the Lisa is on, the Files tab shows only a notice; it checks every 3 s and loads the list once the Lisa is off.
