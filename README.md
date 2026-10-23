@@ -330,6 +330,9 @@ Alternatively, you have the option of routing Serial B through an onboard USB-to
 
 The USB-to-serial interface's hardware handshaking (RTS and CTS) lines are wired up to the corresponding lines within the Lisa, so you'll have full hardware flow control over the USB link!
 
+### LisaNet: WiFi, a web page, and a FujiNet (this fork)
+A Seeed XIAO ESP32S3 wired to the GPIO header (J21) adds WiFi: a web page at `http://lisanet.local/` that manages the ESFloppy and ESProFile SD cards, changes the on-screen menu's settings (and a few jumpers), presses the Lisa's power and reset buttons, and inserts or ejects floppies while the Lisa runs. It can also be a FujiNet on Serial B for programs such as LisaFuji, and an AT-command modem on Serial A. Which XIAO to buy, how to wire it, and how to flash it the first time are in [firmware/lisanet_wifi/README.md](firmware/lisanet_wifi/README.md). Note that LisaNet uses J21's GPIO2-GPIO5 and its 3V3 and GND pins; GPIO0 and GPIO1 keep their jumper functions.
+
 ### I hate the Lisa's contrast control; it makes the screen too dim! Can I just set the contrast to a static value all the time?
 Yes, you can! At the request of Adrian Black, I've added the ability to max out the contrast all the time, regardless of the contrast setting in any OS. To enable this, connect GPIO1 on the GPIO header to 3.3V.
 

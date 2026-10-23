@@ -37,10 +37,11 @@ namespace atmodem {
 static HardwareSerial *lisa = nullptr;
 static Preferences nvs;
 static bool echoOn = true;
+static bool lisaAttached = true;     // see setLisaAttached()
 
 // ---- Output: everything goes to the Lisa and is mirrored on the USB console ----------------------
 static void out(const char *s) {
-    lisa->print(s);
+    if (lisaAttached) lisa->print(s);
     Serial.print(s);
 }
 static void outln(const char *s = "") { out(s); out("\r\n"); }
@@ -307,8 +308,10 @@ void begin(HardwareSerial &port) {
 
 }
 
+void setLisaAttached(bool attached) { lisaAttached = attached; }
+
 void poll() {
-    while (lisa->available()) feed(fromLisa, (char)lisa->read());
+    while (lisaAttached && lisa->available()) feed(fromLisa, (char)lisa->read());
     while (Serial.available()) feed(fromUsb, (char)Serial.read());
 }
 

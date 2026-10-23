@@ -89,8 +89,8 @@ static int call(uint8_t cmd, const uint8_t *pay, uint8_t len, int attempts) {
 
 static uint16_t rd16(const uint8_t *p) { return p[0] | (uint16_t)p[1] << 8; }
 
-int status(Status &s) {
-    int st = call(0x01, nullptr, 0, 3);
+int status(Status &s, int attempts) {
+    int st = call(0x01, nullptr, 0, attempts);
     if (st != OK) return st;
     if (respLen < 15) return BAD_REQUEST;
     const uint8_t *p = resp + 1;                            // version, then the FPGA's status block
@@ -109,6 +109,7 @@ int status(Status &s) {
     s.scanlines = m & 0x01;  s.scanlinesJumper = m & 0x02;  s.inverse = m & 0x04;  s.inverseJumper = m & 0x08;
     s.rom3ASwitch = m & 0x20;  s.twiggy = m & 0x40;  s.twiggySwitch = m & 0x80;  // m bit 4 is rom3A, as in g
     s.ram = r & 0x03;  s.ramSwitch = (r >> 2) & 0x03;  s.ramUserSet = r & 0x10;
+    s.serialB = s.version < 3 ? 0 : (r & 0x20) ? 1 : (r & 0x40) ? 2 : 0;
     return OK;
 }
 

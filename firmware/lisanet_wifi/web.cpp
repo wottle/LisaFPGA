@@ -24,6 +24,9 @@
 //   POST /api/fpga/set?reg=&value=  a setting (fpgactl::Reg); 409 if the Lisa is on and reg is the ESP32 mode, a ROM
 //                                   or the RAM size
 //   POST /api/fpga/action?a=save|power|reset|nmi   save settings, or press the Lisa's power, reset or NMI button
+//   GET  /api/fujinet               the FujiNet adapter on Serial B: {"routed","baud","tz","time","packets","naks","log"}
+//                                   (Serial B itself is switched with /api/fpga/set?reg=13)
+//   POST /api/fujinet?baud=&tz=     its baud rate and POSIX time zone
 //   GET  /api/drive                 the floppy drive (ESFloppy's drive firmware, NORMAL mode): {"twiggy","uiBusy",
 //                                   "drives":[{"n","exists","inserted","ejecting","name"},..],"fw"}; 503 if it does not answer
 //   GET  /api/drive/ls?path=        folders and images that drive mode accepts, as /api/ls
@@ -47,6 +50,7 @@
 #include "wifisetup.h"
 #include "fpgactl.h"
 #include "ota.h"
+#include "fujinet.h"
 
 namespace web {
 
@@ -415,23 +419,52 @@ static void handleFpgaStatus() {
              "\"vLim\":%u,\"contrast\":%s,\"contrastJumper\":%s,\"speedUserSet\":%s,\"speedIdx\":%u,\"lisaOn\":%s,"
              "\"espMode\":%u,\"saved\":%s,\"saving\":%s,\"rom3A\":%s,\"tempC\":%.1f,\"hasMachine\":%s,"
              "\"scanlines\":%s,\"scanlinesJumper\":%s,\"inverse\":%s,\"inverseJumper\":%s,\"rom3ASwitch\":%s,"
-             "\"twiggy\":%s,\"twiggySwitch\":%s,\"ram\":%u,\"ramSwitch\":%u,\"ramUserSet\":%s}",
+             "\"twiggy\":%s,\"twiggySwitch\":%s,\"ram\":%u,\"ramSwitch\":%u,\"ramUserSet\":%s,\"serialB\":%u}",
              s.version, s.videoMode, s.has1024 ? "true" : "false", s.modeUserSet ? "true" : "false", s.hOff, s.hLim,
              s.vOff, s.vLim, s.contrast ? "true" : "false", s.contrastJumper ? "true" : "false",
              s.speedUserSet ? "true" : "false", s.speedIdx, s.lisaOn ? "true" : "false", s.espMode,
              s.saved ? "true" : "false", s.saving ? "true" : "false", s.rom3A ? "true" : "false", s.tempC,
              B(s.hasMachine), B(s.scanlines), B(s.scanlinesJumper), B(s.inverse), B(s.inverseJumper), B(s.rom3ASwitch),
-             B(s.twiggy), B(s.twiggySwitch), s.ram, s.ramSwitch, B(s.ramUserSet));
+             B(s.twiggy), B(s.twiggySwitch), s.ram, s.ramSwitch, B(s.ramUserSet), s.serialB);
+    if (s.version >= 3) fujinet::noteRouted(s.serialB != 0);
     server.send(200, "application/json", o);
 }
 
 static void handleFpgaSet() {
     if (!authorized()) return;
     long reg = server.arg("reg").toInt(), value = server.arg("value").toInt();
-    if (reg < 1 || reg == 7 || reg > 12 || value < 0 || value > 2047) { sendFpgaResult(fpgactl::BAD_REQUEST); return; }
+    if (reg < 1 || reg == 7 || reg > 13 || value < 0 || value > 2047) { sendFpgaResult(fpgactl::BAD_REQUEST); return; }
     int s = fpgactl::set((uint8_t)reg, (uint16_t)value);
     if (s == fpgactl::OK && reg == fpgactl::REG_ESPMODE) lastGood = 0;   // a different SD server (or none) now
+    if (s == fpgactl::OK && reg == fpgactl::REG_SERIALB) fujinet::noteRouted(value != 0);
     sendFpgaResult(s);
+}
+
+static void handleFujinetInfo() {
+    if (!authorized()) return;
+    server.send(200, "application/json", fujinet::infoJson());
+}
+
+static void handleFujinetSet() {
+    if (!authorized()) return;
+    if (server.hasArg("baud")) {
+        long b = server.arg("baud").toInt();
+        if (b != 1200 && b != 2400 && b != 4800 && b != 9600 && b != 19200 && b != 38400 && b != 57600 && b != 115200) {
+            server.send(400, "application/json", "{\"error\":\"Unsupported baud rate\"}");
+            return;
+        }
+        fujinet::setBaud(b);
+    }
+    if (server.hasArg("tz")) {
+        String tz = server.arg("tz");
+        tz.trim();
+        if (!tz.length() || tz.length() > 60) {
+            server.send(400, "application/json", "{\"error\":\"Give a POSIX time zone, such as CST6CDT,M3.2.0,M11.1.0\"}");
+            return;
+        }
+        fujinet::setTimeZone(tz);
+    }
+    server.send(200, "application/json", fujinet::infoJson());
 }
 
 static void handleFpgaAction() {
@@ -440,6 +473,7 @@ static void handleFpgaAction() {
     uint8_t act = a == "save" ? fpgactl::ACT_SAVE : a == "power" ? fpgactl::ACT_POWER : a == "reset" ? fpgactl::ACT_RESET : a == "nmi" ? fpgactl::ACT_NMI : 0;
     if (!act) { sendFpgaResult(fpgactl::BAD_REQUEST); return; }
     Serial.printf("[web] FPGA action: %s\r\n", a.c_str());
+    if (act == fpgactl::ACT_SAVE) fujinet::save();       // Save settings keeps the FujiNet card's settings too
     sendFpgaResult(fpgactl::action(act));
 }
 
@@ -551,6 +585,8 @@ void begin() {
     server.on("/api/fpga", HTTP_GET, handleFpgaStatus);
     server.on("/api/fpga/set", HTTP_POST, handleFpgaSet);
     server.on("/api/fpga/action", HTTP_POST, handleFpgaAction);
+    server.on("/api/fujinet", HTTP_GET, handleFujinetInfo);
+    server.on("/api/fujinet", HTTP_POST, handleFujinetSet);
     server.on("/api/drive", HTTP_GET, handleDriveStatus);
     server.on("/api/drive/ls", HTTP_GET, handleDriveLs);
     server.on("/api/drive/insert", HTTP_POST, handleDriveInsert);

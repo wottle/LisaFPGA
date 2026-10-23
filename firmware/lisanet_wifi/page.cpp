@@ -88,6 +88,19 @@ and that drive is offline meanwhile. It can only change while the Lisa is off.</
 <div class="row"><label class="k" for="sRam">RAM</label><select id="sRam"><option value="0">Follow the RAM SIZE jumpers</option><option value="1">512 KB</option>
 <option value="2">1 MB</option><option value="3">1.5 MB</option><option value="4">2 MB</option></select><span class="mut" id="sRamJ"></span></div>
 <div class="mut" id="sMachNote">H ROMs work in every OS; 3A only in MacWorks. Use the Twiggy ROM only with a Twiggy drive. These can only change while the Lisa is off.</div></div>
+<div class="card sb" hidden><h3>FujiNet (Serial B)</h3>
+<div class="row"><label class="k" for="sFn">Serial B</label><select id="sFn"><option value="0">Its own port</option><option value="1">This WiFi board (FujiNet adapter)</option>
+<option value="2">Bench test: the board's Serial B USB port to this board</option></select></div>
+<div class="row"><label class="k" for="fnBaud">Baud rate</label><select id="fnBaud"><option>1200</option><option>2400</option><option>4800</option>
+<option>9600</option><option>19200</option><option>38400</option><option>57600</option><option>115200</option></select></div>
+<div class="row"><label class="k" for="fnTz">Time zone</label><input id="fnTz" size="26" placeholder="UTC0"><button id="fnTzB">Set</button></div>
+<div class="row"><label class="k">Clock</label><span id="fnTime">-</span></div>
+<div class="mut">For Lisa programs written for an RS-232 FujiNet, such as LisaFuji: web pages over HTTP and HTTPS, JSON, the network
+clock. Serial B shares the WiFi board's two serial wires with the Serial A modem, so while it is on, Serial A is its own port
+again. The time zone is in POSIX form (e.g. EST5EDT,M3.2.0,M11.1.0). Like the other settings, these apply at once and are
+kept across a power cycle only after Save settings.</div>
+<div class="row"><span class="mut" id="fnStat"></span></div>
+<pre id="fnLog" class="mut" style="white-space:pre-wrap;font-size:12px;margin:4px 0 0"></pre></div>
 <div class="bar"><button id="bSave">Save settings</button><span class="mut" id="sSaved"></span></div>
 <p class="mut">Changes apply at once, as in the on-screen menu, and are kept across a power cycle only after Save settings.</p>
 <div class="card"><h3>WiFi board firmware</h3>
@@ -239,6 +252,9 @@ function render(s){
  $('sCon').checked=s.contrast;$('sConJ').textContent=s.contrastJumper?'(the MAX CONTRAST jumper is on; this flips it)':'';
  if(document.activeElement!==$('sSpd'))$('sSpd').value=s.speedUserSet?s.speedIdx+1:0;
  $('sSaved').textContent=s.saving?'Saving...':s.saved?'Saved settings are in flash.':'Nothing saved yet: defaults at power-up.';
+ // Serial B to this board (FujiNet): FPGA control version 3
+ const sb=s.version>=3;document.querySelectorAll('.sb').forEach(e=>e.hidden=!sb);
+ if(sb&&document.activeElement!==$('sFn'))$('sFn').value=s.serialB;
  // Jumper/switch overrides and NMI: only with an FPGA build that reports them (control version 2)
  const m=!!s.hasMachine;document.querySelectorAll('.mach').forEach(e=>e.hidden=!m);$('bNmi').hidden=!m;if(!m)return;
  const note=(eff,sw,what)=>'('+what+(eff!==sw?'; overridden here':'')+')';
@@ -252,7 +268,15 @@ function render(s){
  $('sRamJ').textContent='(jumpers: '+RAM[s.ramSwitch]+(s.ramUserSet?'; '+RAM[s.ram]+' set here':'')+')';
  $('sMachNote').style.color=s.lisaOn?'var(--bad)':'';
  $('sMachNote').textContent=s.lisaOn?'Locked while the Lisa is on. Shut it down first.':MACHNOTE;}
-async function frefresh(){try{const s=await fpga('/api/fpga');fst=s;render(s);}catch(e){msg(e.message,1);}drefresh();}
+async function frefresh(){try{const s=await fpga('/api/fpga');fst=s;render(s);}catch(e){msg(e.message,1);}drefresh();
+ if(fst&&fst.version>=3)fninfo();}
+// FujiNet card: the adapter's own settings and what the Lisa has been asking for
+function fnshow(i){if(document.activeElement!==$('fnBaud'))$('fnBaud').value=i.baud;if(document.activeElement!==$('fnTz'))$('fnTz').value=i.tz;
+ $('fnTime').textContent=i.time+(i.unsaved?'  (baud rate or time zone not saved yet)':'');
+ $('fnStat').textContent=(i.routed?'Active':'Not active (Serial B is on its own port)')+' - '+i.packets+' requests, '+i.naks+' refused';
+ $('fnLog').textContent=i.log.slice().reverse().join('\n');}
+async function fninfo(){try{fnshow(await fpga('/api/fujinet'));}catch(e){}}
+async function fnset(q){await fdo(async()=>{fnshow(await fpga('/api/fujinet?'+q,{method:'POST'}));});}
 // Settings is the first tab; #files in the address keeps the Files tab across a reload. Card space (a slow FAT scan
 // on ESFloppy) is read the first time Files is shown.
 // While the Lisa is on, the Files tab shows only a notice; it checks every 3 s and loads the list once the Lisa is off.
@@ -291,6 +315,11 @@ $('sInv').onchange=()=>fdo(()=>fset(9,$('sInv').checked?1:0));
 document.querySelectorAll('#sCpuRom button').forEach(b=>b.onclick=()=>fdo(()=>fset(10,+b.dataset.v)));
 document.querySelectorAll('#sIoRom button').forEach(b=>b.onclick=()=>fdo(()=>fset(11,+b.dataset.v)));
 $('sRam').onchange=()=>fdo(()=>fset(12,+$('sRam').value));
+$('sFn').onchange=()=>fdo(async()=>{await fset(13,+$('sFn').value);
+ const v=+$('sFn').value;msg(v===1?'Serial B is now on the WiFi board: the FujiNet adapter is answering (Serial A is its own port again).':
+  v===2?'Bench test: a PC on the board\x27s Serial B USB port now talks to the FujiNet adapter, and the Lisa\x27s Serial B is idle. Not saved.':'Serial B is back on its own port.');});
+$('fnBaud').onchange=()=>fnset('baud='+$('fnBaud').value);
+$('fnTzB').onclick=()=>fnset('tz='+encodeURIComponent($('fnTz').value));
 $('bNmi').onclick=()=>{if(confirm('Press the NMI button? As with the real one, what happens depends on what the Lisa is running, and it may crash.'))
   fdo(async()=>{await fpga('/api/fpga/action?a=nmi',{method:'POST'});msg('NMI pressed.');});};
 $('bSave').onclick=()=>fdo(async()=>{await fpga('/api/fpga/action?a=save',{method:'POST'});await frefresh();msg('Settings saved to flash.');});

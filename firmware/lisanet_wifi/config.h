@@ -7,10 +7,12 @@
 //   - the Lisa's Serial A to this board (an AT-command modem, 9600 8N1), and
 //   - ESFloppy's ESP32 to this board (the LisaNet file protocol, 2 Mbaud), so its SD card can be managed over WiFi.
 // In FLOPPY mode both are disconnected: the modem goes quiet and the web page reports ESFloppy as unreachable.
+// With the web page's FujiNet setting on, the FPGA puts the Lisa's Serial B on the D0/D1 wires instead (in any mode),
+// and this board answers there as an RS-232 FujiNet (fujinet.cpp); the modem is off the wires meanwhile.
 //
 // Wiring (XIAO pin -> J21 pin):
-//   D0 (GPIO1)  <- J21 pin 5  GPIO2  the Lisa's Serial A transmit data
-//   D1 (GPIO2)  -> J21 pin 7  GPIO3  into the Lisa's Serial A receive
+//   D0 (GPIO1)  <- J21 pin 5  GPIO2  the Lisa's Serial A (or B) transmit data
+//   D1 (GPIO2)  -> J21 pin 7  GPIO3  into the Lisa's Serial A (or B) receive
 //   D7 (GPIO44) <- J21 pin 2  GPIO4  from ESFloppy
 //   D6 (GPIO43) -> J21 pin 4  GPIO5  to ESFloppy
 //   GND         -- J21 pin 6
@@ -20,11 +22,11 @@
 #pragma once
 
 #ifndef LISANET_WIFI_VERSION         // a test build can override it with -D
-#define LISANET_WIFI_VERSION "0.8"
+#define LISANET_WIFI_VERSION "0.10"
 #endif
 // What this version brought, shown next to the version on the web page. Rewrite it with every new version.
 #ifndef LISANET_WIFI_NOTES
-#define LISANET_WIFI_NOTES   "back to NORMAL while the Lisa runs, disk dropdown"
+#define LISANET_WIFI_NOTES   "FujiNet settings kept by Save settings"
 #endif
 
 #define LISA_RX_PIN   1        // D0

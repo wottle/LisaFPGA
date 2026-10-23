@@ -1,0 +1,220 @@
+# LisaNet: the LisaFPGA WiFi board
+
+LisaNet adds WiFi to a LisaFPGA (rev 3) board with a small, cheap ESP32 board plugged into the spare **J21** header.
+Through a web page at `http://lisanet.local/` it lets you:
+
+- **Manage the SD cards** of the onboard floppy and hard disk emulators: list, upload, download, rename, delete,
+  copy to `profile.image`, and choose the floppy ESFloppy mounts at start-up (**Files** tab, with the Lisa off).
+- **Change the LisaFPGA's settings** that the on-screen menu has: resolution, image position, CPU speed, contrast,
+  plus scanlines, inverse video, the ROM switches and the RAM size; save them; press the Lisa's power, reset and NMI
+  buttons; and watch the FPGA's temperature (**Settings** tab).
+- **Insert and eject floppies** while the Lisa is running.
+- **Act as a FujiNet** on the Lisa's Serial B, for Lisa programs written for an RS-232 FujiNet, such as
+  [LisaFuji](https://github.com/GyroPilot/Apple-LisaFuji) (news, Wikipedia, weather, the network clock).
+- **Act as a Hayes-style modem** on the Lisa's Serial A (AT commands, for LisaTerminal) while ESP32 MODE is WIFI FDD.
+- **Update itself over WiFi.**
+
+Why an external board: the rev 3 board's own ESP32-S3s (ESFloppy and ESProFile) have no antenna -- their RF pin is
+not connected on the PCB -- so they cannot use WiFi. The WiFi board does the WiFi and asks ESFloppy or ESProFile to
+serve its SD card over a fast serial link that passes through the FPGA.
+
+## What you need
+
+| Part | Notes |
+|---|---|
+| **Seeed Studio XIAO ESP32S3** | The plain XIAO ESP32S3 (the "Sense" version with the camera also works). It has 8 MB of flash, which the firmware needs for over-the-air updates. **Fit the antenna that comes with it** (the small U.FL patch antenna): without it WiFi range is a few centimetres. |
+| 5 or 6 female-to-female Dupont wires | To J21. |
+| A USB-C cable | For the first flash, and optionally to power the XIAO. |
+| LisaFPGA FPGA firmware with LisaNet | This fork's `main` (the LisaNet builds: ESP32 MODE in the on-screen menu). The FujiNet needs the 2026-10-22 build or later (FPGA control version 3). |
+| ESFloppy and ESProFile LisaNet firmware | For SD card management and the floppy remote: the `main` branches of [wottle/ESFloppy](https://github.com/wottle/ESFloppy) and [wottle/ESProFile](https://github.com/wottle/ESProFile). Without them the Settings tab and the FujiNet still work, but the Files tab cannot reach the cards. |
+
+## Wiring
+
+J21 is a 2x4 header (2.54 mm). Pin 1 is the square pad / the one marked on the silkscreen; odd pins are in one row and
+even pins in the other:
+
+```
+            J21 (looking at the pins)
+         +-----------+-----------+
+  pin 1  |  GPIO0    |  GPIO4    |  pin 2   -> XIAO D7
+  pin 3  |  GPIO1    |  GPIO5    |  pin 4   -> XIAO D6
+  pin 5  |  GPIO2    |  GND      |  pin 6   -> XIAO GND
+  pin 7  |  GPIO3    |  3V3      |  pin 8   -> XIAO 3V3 (optional, see Power)
+         +-----------+-----------+
+   pin 5 -> XIAO D0        pin 7 -> XIAO D1
+```
+
+| J21 pin | FPGA signal | XIAO pin | Direction | Carries |
+|---|---|---|---|---|
+| 5 | GPIO2 | **D0** (GPIO1) | board -> XIAO | the Lisa's Serial A (modem) or Serial B (FujiNet) transmit data |
+| 7 | GPIO3 | **D1** (GPIO2) | XIAO -> board | into the Lisa's Serial A or B receive |
+| 2 | GPIO4 | **D7** (GPIO44, RX) | board -> XIAO | from the SD card server and from the FPGA itself |
+| 4 | GPIO5 | **D6** (GPIO43, TX) | XIAO -> board | to the SD card server and to the FPGA itself |
+| 6 | GND | **GND** | | |
+| 8 | 3V3 | **3V3** | | optional power, see below |
+| 1, 3 | GPIO0, GPIO1 | -- | | leave unconnected: they are the board's spare jumper inputs |
+
+Notes:
+- **D7 must go to pin 2.** It is the only line back to the XIAO: if it is wrong, the web page says the FPGA is not
+  answering *and* the SD cards are unreachable.
+- The FPGA only drives J21 when it sees a WiFi board there (a powered XIAO holds pin 4 high), so the header is safe
+  with nothing plugged in, and the ESP32 MODE menu row only appears once the board is detected (about 2 s).
+
+### Power
+
+Power the XIAO **one** way:
+
+- **From its own USB-C** (a phone charger or a computer). Leave J21 pin 8 unconnected. Easiest while setting up.
+- **From J21 pin 8 (3V3)**, so nothing else is needed once it is installed. The board's 3.3 V regulators have plenty of
+  headroom for the XIAO's WiFi bursts.
+
+**Never both at once**: with 3V3 wired from J21, unplug the J21 pin 8 wire before plugging a USB-C cable into the XIAO
+(for example to re-flash it), or the XIAO's regulator and the board's 3.3 V rail fight each other.
+
+**Never connect anything to the XIAO's 5V pin.** On a USB-powered XIAO that pin is the computer's USB 5 V: a wire
+slipping onto it can short the computer's USB port (it trips the port's protection; a reboot brings it back).
+
+## First flash
+
+This is done once, over USB. After it, updates go over WiFi (see below).
+
+### 1. Install the tools
+
+Either [arduino-cli](https://arduino.github.io/arduino-cli/) or the Arduino IDE 2 works. The firmware is built with the
+ESP32 Arduino core **3.3.12**.
+
+```bash
+arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+```
+
+```bash
+arduino-cli core update-index
+```
+
+```bash
+arduino-cli core install esp32:esp32@3.3.12
+```
+
+No extra libraries are needed. (On the LisaFPGA development machine arduino-cli lives at
+`tools/toolchain/arduino-cli/arduino-cli.exe`.)
+
+### 2. Build
+
+From the top of this repository:
+
+```bash
+arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 --output-dir firmware/lisanet_wifi/build firmware/lisanet_wifi
+```
+
+Keep the board's default options (they include the 8 MB partition table with the two firmware slots that WiFi updates
+need). In the Arduino IDE: open `lisanet_wifi.ino`, choose **XIAO_ESP32S3**, leave the Tools menu as it is.
+
+### 3. Put the XIAO in download mode and upload
+
+1. Plug the XIAO into the computer by USB-C (with J21 pin 8 unconnected, see Power). Note its port: `COMn` on
+   Windows, `/dev/cu.usbmodem...` on a Mac, `/dev/ttyACM0` on Linux.
+2. A new XIAO runs Seeed's demo firmware, which cannot be uploaded to automatically: **hold the B (BOOT) button, tap
+   R (RESET), release B.** The port may change number now.
+3. Upload:
+
+   ```bash
+   arduino-cli upload --fqbn esp32:esp32:XIAO_ESP32S3 -p COM7 --input-dir firmware/lisanet_wifi/build firmware/lisanet_wifi
+   ```
+
+   (use your port in place of `COM7`).
+4. **Press R once** by itself. After a manual download mode the chip can otherwise keep restarting into the loader
+   ("waiting for download"). From now on uploads reset it automatically.
+
+### 4. Check that it runs
+
+Open the XIAO's USB serial port at 115200 baud **with DTR on** (it sends nothing until DTR is set; opening the port
+restarts it). It prints `[lisanet] LisaNet WiFi board <version>` and then what WiFi is doing. Any terminal works;
+`tools/lisanet_client/xiao_term.ps1 -Port COM7` is a small PowerShell one. The same port takes AT commands: type
+`AT+HELP`.
+
+## Getting it onto your WiFi
+
+With no network saved, the XIAO starts its own network:
+
+1. On a phone or computer, join **`LisaNet-Setup`**, password **`lisanet-setup`**. A phone usually pops up the setup page
+   by itself; otherwise browse to `http://192.168.4.1/setup`.
+2. Pick your network, type its password, and choose a **web page password** (4 characters or more). The web page's
+   user name is **`lisa`**.
+3. The XIAO joins your network and turns the setup network off a minute later.
+
+Then browse to **`http://lisanet.local/`** (or the XIAO's IP address, shown on the USB console and by `AT+WIP`).
+
+- If the saved network cannot be found for a minute, the setup network comes back, and the XIAO keeps looking for the
+  saved one every few minutes.
+- **Holding the B button for 5 seconds** forgets the network and the web password and starts setup from scratch.
+- The same can be done with AT commands, on the USB console, or from LisaTerminal on Serial A in WIFI FDD mode:
+  `AT+WSCAN`, `AT+WJOIN="network","password"`, `AT+WEBPASS="password"`.
+
+The web page uses HTTP Basic authentication over plain HTTP: fine on a home network, not for the internet.
+
+## Installing it in the LisaFPGA
+
+1. Turn the board off, wire the XIAO to J21 as above, power it, and turn the board on.
+2. Within a couple of seconds the on-screen menu (hold LEFT + RIGHT for about 3 s) shows **ESP32 MODE** as its first
+   row, and the web page's **Settings** tab answers.
+3. **ESP32 MODE** picks what the SD cards are doing:
+   - **NORMAL**: both emulators are the Lisa's drives, as usual. The Settings tab, the floppy remote and the FujiNet
+     work; Serial A is its own port.
+   - **WIFI FDD** / **WIFI HDD**: ESFloppy's / ESProFile's card is managed from the Files tab, and that drive is offline
+     meanwhile; the Lisa's Serial A goes to the XIAO's AT modem. These can only be chosen with the Lisa off, and
+     switching the Lisa on drops WIFI HDD back to NORMAL (the Lisa needs its hard disk). WIFI FDD stays, so the modem
+     can be used from a running Lisa.
+   It can also be changed from the Settings tab. Press **Save settings** to keep any setting across a power cycle.
+
+## Using the FujiNet (Serial B)
+
+1. On the Settings tab's **FujiNet (Serial B)** card, set **Serial B** to **This WiFi board (FujiNet adapter)**. The
+   Lisa's Serial B then goes to the XIAO instead of its own connector; no cable is needed. It shares the XIAO's two
+   serial wires with the Serial A modem, so while it is on, Serial A is its own port even in WIFI FDD.
+2. Set the **baud rate** to what the Lisa program uses (LisaFuji: 9600 or 19200, from its Speed menu) and your **time
+   zone** in POSIX form, for example `EST5EDT,M3.2.0,M11.1.0` (US Eastern) or `CET-1CEST,M3.5.0,M10.5.0/3`
+   (Central Europe). The network clock comes from internet time.
+3. Press **Save settings** to keep all three.
+4. In Lisa Office System, set Serial B to **Serial Cable** in the Preferences tool, then run the program.
+
+The card shows how many requests the Lisa made and a log of them, including anything the adapter does not support.
+It answers HTTP and HTTPS (GET, POST, PUT, DELETE), the JSON parser, the network clock, and the FujiNet's status and
+adapter information. HTTPS certificates are not checked.
+
+**Bench test**: the Serial B setting's third choice wires the board's *own* Serial B port to the XIAO instead, so a PC
+can stand in for the Lisa: `tools/lisanet_client/fujinet_test.ps1 -Port COMn` on the board's "LisaFPGA Serial B" USB
+port. The board's SERIAL B SOURCE switch must be at USB for that, since it chooses where Serial B's receive line comes
+from.
+
+## Updating over WiFi
+
+On the Settings tab, **WiFi board firmware -> Install update...**, and choose `lisanet_wifi.ino.bin` from the build
+folder (**not** `lisanet_wifi.ino.merged.bin`, which is refused). The XIAO restarts into the new version, which has to
+run for 20 seconds before it is kept: if it crashes sooner, the XIAO goes back to the previous version by itself, and
+**Go back to** on the card returns to the previous version by hand. Only images of this firmware are accepted.
+
+If an update ever leaves the web page unreachable, flash over USB again as in First flash.
+
+## Troubleshooting
+
+| Symptom | Look at |
+|---|---|
+| "The FPGA is not answering" | The D7 -> J21 pin 2 wire; and that the FPGA runs a LisaNet build. |
+| Files tab: "No SD card server is reachable" | ESP32 MODE must be WIFI FDD or WIFI HDD, and ESFloppy / ESProFile must run the LisaNet firmware. |
+| No ESP32 MODE row in the menu | The XIAO is not powered, or D6 is not on J21 pin 4 (that is how the board detects it). |
+| The XIAO keeps saying "waiting for download" | Press R once by itself. |
+| The USB console shows nothing | Turn DTR on in the terminal. |
+| The FujiNet card is missing | The FPGA build predates the FujiNet (control version 3). |
+| A Lisa FujiNet program gets no answer | Serial B set to This WiFi board, matching baud rates, and Serial Cable in the LOS Preferences. |
+
+## For developers
+
+- `lisanet_wifi.ino` -- start-up and the main loop. Everything runs from `loop()` on one task, so the serial link is
+  never used by two things at once.
+- `web.cpp`, `page.cpp`, `setup_page.cpp` -- the web server, the page and the setup page.
+- `sdlink.cpp` -- the SD card link to ESFloppy / ESProFile; `fpgactl.cpp` -- the FPGA's own control frames on the same
+  link. Both are described in [docs/lisanet_link_protocol.md](../../docs/lisanet_link_protocol.md).
+- `fujinet.cpp` -- the FujiNet adapter (FujiBus over SLIP, written from the protocol as fujinet-firmware implements it).
+- `atmodem.cpp` -- the AT modem; `wifisetup.cpp` -- the setup network; `ota.cpp` -- updates over WiFi.
+- `config.h` -- pins, baud rates, and `LISANET_WIFI_VERSION`: bump it for every release, because the web page tells
+  versions apart by that string.
