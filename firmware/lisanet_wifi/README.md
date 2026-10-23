@@ -216,8 +216,10 @@ Claude API key set ...]`, `[error: HTTP 401, check the API key]`, `[error: no co
 
 The answer is converted to ASCII: curly quotes, dashes, bullets and accented Latin letters become plain ones, emoji and other
 scripts are dropped, markdown marks (`**`, `` ` ``, `#`, `* `) are removed. The default instructions also ask the model for
-short plain text; change them on the page. The HTTPS connection does not check the server's certificate (no certificate
-store here), so the key travels over an unverified TLS session; the same is true of every HTTPS fetch on the FujiNet.
+short plain text; change them on the page. The HTTPS connection checks the provider's certificate against two built-in roots (Google Trust Services R1 and R4, which both
+APIs chain to; see `chat_roots.h`), so the board's clock must be set (it learns the time over NTP shortly after joining WiFi). If a
+provider ever moves to another certificate authority, calls fail with a "no connection" error: untick *Verify certificates*
+on the page and add the new root to `chat_roots.h`.
 
 Host tests for the conversion, history and request code: `g++ -std=c++17 -Wall -I.. test/test_chatcore.cpp chatcore.cpp -o
 /tmp/test_chatcore && /tmp/test_chatcore` from this folder (`chat.cpp` is the part that needs the board).

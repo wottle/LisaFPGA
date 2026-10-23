@@ -24,6 +24,6 @@ void resetHistory();                   // chat://reset: forget the conversation 
 
 String infoJson();                     // settings and state, never the keys: {"provider","claudeKey":bool,...}
 bool setConfig(const String &name, const String &value, String &err);   // provider claudeKey openaiKey claudeModel
-                                       // openaiModel maxTokens turns system; kept in NVS at once
+                                       // openaiModel maxTokens turns system verify; kept in NVS at once
 
 }  // namespace chat

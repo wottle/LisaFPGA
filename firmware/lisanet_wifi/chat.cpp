@@ -2,6 +2,7 @@
 #include "chat.h"
 #include "chatcore.h"
 #include "config.h"
+#include "chat_roots.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -19,6 +20,7 @@ static const uint32_t HTTP_TIMEOUT_MS = 70000;    // per read; a model may think
 static Preferences nvs;
 static String keyClaude, keyOpenai, modelClaude, modelOpenai, systemPrompt, defaultProvider;
 static int maxTokens = 600, historyTurns = 12;
+static bool verifyTls = true;                     // check the API servers' certificates against CHAT_ROOTS
 
 static const char *DEFAULT_SYSTEM =
     "You are chatting with someone at an Apple Lisa computer from 1983 with a small black-and-white text screen. "
@@ -32,7 +34,7 @@ static String lastNote;                           // the last request's outcome,
 
 struct Job {                                      // handed to the task; the task writes ok and text, then st = FINISHED
     int provider = 0;
-    bool remember = false;
+    bool remember = false, verify = true;
     std::string url, body;
     String key, model;
     bool ok = false;
@@ -51,6 +53,7 @@ void begin() {
     systemPrompt = nvs.getString("sys", DEFAULT_SYSTEM);
     maxTokens = nvs.getInt("maxtok", 600);
     historyTurns = nvs.getInt("turns", 12);
+    verifyTls = nvs.getBool("verify", true);
 }
 
 State state() {
@@ -117,12 +120,14 @@ public:
 static void chatTask(void *) {
     Job &j = job;
     WiFiClientSecure client;
-    client.setInsecure();                                       // no certificate store here, as in fujinet.cpp
+    if (j.verify) client.setCACert(CHAT_ROOTS);
+    else client.setInsecure();
     HTTPClient http;
     http.setTimeout(HTTP_TIMEOUT_MS);
     http.setReuse(false);
     String err;
-    if (!http.begin(client, j.url.c_str())) err = "could not start the request";
+    if (j.verify && time(nullptr) < 1700000000) err = "the board's clock is not set yet (no NTP answer), so certificates cannot be checked; try again in a minute";
+    else if (!http.begin(client, j.url.c_str())) err = "could not start the request";
     else {
         http.addHeader("Content-Type", "application/json");
         if (j.provider == CLAUDE) {
@@ -132,7 +137,12 @@ static void chatTask(void *) {
             http.addHeader("Authorization", "Bearer " + j.key);
         }
         int code = http.POST((uint8_t *)j.body.data(), j.body.size());
-        if (code <= 0) err = String("no connection (") + http.errorToString(code) + ")";
+        if (code <= 0) {
+            char why[100] = "";
+            client.lastError(why, sizeof why);
+            err = String("no connection (") + http.errorToString(code) + (why[0] ? String(": ") + why : String("")) + ")";
+            if (j.verify && why[0]) err += "; if a certificate problem, turn off Verify certificates on the web page";
+        }
         else if (http.getSize() > (int)MAX_RESPONSE) err = "the reply was too large";
         else {
             CapSink sink;
@@ -176,6 +186,7 @@ bool start(int kind, const std::string &prompt, bool remember) {
     job = Job();
     job.provider = provider;
     job.remember = remember;
+    job.verify = verifyTls;
     job.key = key;
     job.model = model;
     job.url = provider == CLAUDE ? "https://api.anthropic.com/v1/messages" : "https://api.openai.com/v1/chat/completions";
@@ -227,7 +238,7 @@ String infoJson() {
     String o = "{\"provider\":\"" + defaultProvider + "\",\"claudeKey\":" + (keyClaude.length() ? "true" : "false") +
                ",\"openaiKey\":" + (keyOpenai.length() ? "true" : "false") + ",\"claudeModel\":\"" + jesc(modelClaude) +
                "\",\"openaiModel\":\"" + jesc(modelOpenai) + "\",\"maxTokens\":" + maxTokens + ",\"turns\":" + historyTurns +
-               ",\"system\":\"" + jesc(systemPrompt) + "\",\"state\":\"" +
+               ",\"system\":\"" + jesc(systemPrompt) + "\",\"verify\":" + (verifyTls ? "true" : "false") + ",\"state\":\"" +
                (state() == IDLE ? "idle" : state() == RUNNING ? "running" : "reply") + "\",\"claudeTurns\":" +
                (unsigned)hist[CLAUDE].size() + ",\"openaiTurns\":" + (unsigned)hist[OPENAI].size() + ",\"last\":\"" +
                jesc(lastNote) + "\"}";
@@ -256,6 +267,8 @@ bool setConfig(const String &name, const String &raw, String &err) {
         long n = v.toInt();
         if (n < 2 || n > 40) { err = "history is 2 to 40 turns"; return false; }
         historyTurns = n; nvs.putInt("turns", historyTurns);
+    } else if (name == "verify") {
+        verifyTls = v == "1" || v == "true"; nvs.putBool("verify", verifyTls);
     } else if (name == "system") {
         if (v.length() > 600) { err = "the system prompt is limited to 600 characters"; return false; }
         systemPrompt = v; nvs.putString("sys", v);

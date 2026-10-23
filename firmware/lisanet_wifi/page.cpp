@@ -112,12 +112,13 @@ kept across a power cycle only after Save settings.</div>
 <div class="row"><label class="k" for="chTok">Reply length</label><input id="chTok" type="number" min="16" max="4000" style="width:80px"><span class="mut">tokens at most</span></div>
 <div class="row"><label class="k" for="chTurns">Memory</label><input id="chTurns" type="number" min="2" max="40" style="width:80px"><span class="mut">messages kept per conversation</span></div>
 <div class="row"><label class="k" for="chSys">Instructions</label><textarea id="chSys" rows="3" cols="46" maxlength="600"></textarea></div>
+<div class="row"><label class="k" for="chVerify">Certificates</label><label><input type="checkbox" id="chVerify"> Verify certificates</label><span class="mut">turn off only if a provider changes its certificate authority</span></div>
 <div class="row"><button id="chSave">Save chat settings</button><button id="chReset">Forget the conversation</button><span class="mut" id="chStat"></span></div>
 <div class="row"><label class="k" for="chText">Try it</label><input id="chText" size="40" placeholder="Ask something"><button id="chAsk">Ask</button></div>
 <pre id="chOut" class="mut" style="white-space:pre-wrap;font-size:12px;margin:4px 0 0"></pre>
 <div class="mut">A Lisa program opens chat://claude or chat://openai on a network unit, writes a question and reads the answer, as plain
 ASCII. The WiFi board keeps the API keys (blank leaves a key as it is; the page never shows one), the settings and the conversation.
-These are kept at once, without Save settings. Replies come over HTTPS without checking the server's certificate.</div></div>
+These are kept at once, without Save settings. The HTTPS connections check the providers' certificates against Google Trust Services roots built into the firmware.</div></div>
 <div class="bar"><button id="bSave">Save settings</button><span class="mut" id="sSaved"></span></div>
 <p class="mut">Changes apply at once, as in the on-screen menu, and are kept across a power cycle only after Save settings.</p>
 <div class="card"><h3>WiFi board firmware</h3>
@@ -299,14 +300,14 @@ async function fnset(q){await fdo(async()=>{fnshow(await fpga('/api/fujinet?'+q,
 // AI chat card: settings in the board's NVS, and a one-off test question
 let chLoaded=false,chTimer=null;
 function chShow(i){const f=(id,v)=>{if(document.activeElement!==$(id))$(id).value=v;};
- f('chProv',i.provider);f('chCModel',i.claudeModel);f('chOModel',i.openaiModel);f('chTok',i.maxTokens);f('chTurns',i.turns);f('chSys',i.system);
+ f('chProv',i.provider);f('chCModel',i.claudeModel);f('chOModel',i.openaiModel);f('chTok',i.maxTokens);f('chTurns',i.turns);f('chSys',i.system);$('chVerify').checked=i.verify;
  $('chCKey').placeholder=i.claudeKey?'(set - leave blank to keep)':'sk-ant-...';$('chOKey').placeholder=i.openaiKey?'(set - leave blank to keep)':'sk-...';
  $('chCSet').textContent=i.claudeKey?'key set':'no key';$('chOSet').textContent=i.openaiKey?'key set':'no key';
  $('chStat').textContent='Conversation: Claude '+i.claudeTurns+', OpenAI '+i.openaiTurns+' messages'+(i.last?' - last: '+i.last:'');chLoaded=true;}
 async function chinfo(){try{chShow(await fpga('/api/chat'));}catch(e){}}
 $('chSave').onclick=()=>fdo(async()=>{const b=new URLSearchParams();
  b.set('provider',$('chProv').value);b.set('claudeModel',$('chCModel').value);b.set('openaiModel',$('chOModel').value);
- b.set('maxTokens',$('chTok').value);b.set('turns',$('chTurns').value);b.set('system',$('chSys').value);
+ b.set('maxTokens',$('chTok').value);b.set('turns',$('chTurns').value);b.set('system',$('chSys').value);b.set('verify',$('chVerify').checked?'1':'0');
  if($('chCKey').value.trim())b.set('claudeKey',$('chCKey').value);if($('chOKey').value.trim())b.set('openaiKey',$('chOKey').value);
  chShow(await fpga('/api/chat/config',{method:'POST',body:b}));$('chCKey').value='';$('chOKey').value='';msg('Chat settings saved.');});
 $('chReset').onclick=()=>fdo(async()=>{chShow(await fpga('/api/chat/reset',{method:'POST'}));});
