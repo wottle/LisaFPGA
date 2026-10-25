@@ -154,7 +154,9 @@ The web page uses HTTP Basic authentication over plain HTTP: fine on a home netw
 
 ## Installing it in the LisaFPGA
 
-1. Turn the board off, wire the XIAO to J21 as above, power it, and turn the board on.
+1. With the LisaFPGA switched off, wire the XIAO to J21 as above. Then supply power to the LisaFPGA and flip the
+   LisaFPGA's power switch on: that powers both the LisaFPGA and the XIAO ESP32-S3, through J21's 3V3 pin. (If you
+   power the XIAO from its own USB-C instead, see Power above, plug that in as well.)
 2. Within a couple of seconds the on-screen menu (hold LEFT + RIGHT for about 3 s) shows **ESP32 MODE** as its first
    row, and the web page's **Settings** tab answers.
 3. The **ESP32 mode** card on the Settings tab (ESP32 MODE in the on-screen menu) picks what the SD cards are doing:
@@ -175,6 +177,8 @@ The web page uses HTTP Basic authentication over plain HTTP: fine on a home netw
 2. Set the **baud rate** to what the Lisa program uses (LisaFuji: 9600 or 19200, from its Speed menu) and your **time
    zone** in POSIX form, for example `EST5EDT,M3.2.0,M11.1.0` (US Eastern) or `CET-1CEST,M3.5.0,M10.5.0/3`
    (Central Europe). The network clock comes from internet time.
+   The FujiNet has only been tested at **9600 and 19200 baud**. The card offers rates up to 115200, but higher ones are
+   untested.
 3. Press **Save settings** to keep all three.
 4. In Lisa Office System, set Serial B to **Serial Cable** in the Preferences tool, then run the program.
 

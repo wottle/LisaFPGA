@@ -115,7 +115,7 @@ On the Settings tab (or the ESP32 MODE row in the on-screen menu), choose:
 - **Manage ESFloppy files** / **Manage ESProFile files**: that card opens in the **Files** tab (the Lisa must be off).
 
 For a FujiNet on Serial B (LisaFuji and similar), set **Serial B** to *This WiFi board* on the Settings tab, match the
-baud rate, and set Serial Cable in the LOS Preferences.
+baud rate, and set Serial Cable in the LOS Preferences. The FujiNet has only been tested at 9600 and 19200 baud.
 
 ## After the first time
 
