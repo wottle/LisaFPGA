@@ -24,7 +24,7 @@ Before running the script:
 - Plug the board into your computer's USB port with a data-capable USB-C cable, and make sure the board's power switch is on.
 - Your computer may prompt you to allow the board's USB hub to connect. If it does, approve it. You may then need to unplug and reconnect the board before running the script.
 
-The script flashes whatever bitstream is in your checkout, so running it from this fork installs the fork's version. The ESProFile and ESFloppy ESP32 firmware is still downloaded from Alex's repos. See [Programming/Updating the Firmware](#programmingupdating-the-firmware) for details.
+The script flashes whatever bitstream is in your checkout, so running it from this fork installs the fork's version. The ESProFile and ESFloppy ESP32 firmware comes from this fork's own copies, [wottle/ESProFile](https://github.com/wottle/ESProFile) and [wottle/ESFloppy](https://github.com/wottle/ESFloppy): Alex's firmware plus the LisaNet pieces (an SD card server for the WiFi board, ESFloppy's floppy remote and a guard against a dead OLED), which behave like Alex's when there is no WiFi board. See [Programming/Updating the Firmware](#programmingupdating-the-firmware) for details.
 
 # Start Here
 Here are some links to different parts of this document depending on what you want to do:
@@ -205,8 +205,8 @@ If you downloaded a ZIP from GitHub instead of cloning, the folder will be named
 Of course, make sure that you have your board plugged into your computer and powered on before you run the script! This script will automatically install all the necessary dependencies and do the following things to your board:
 - Programs the FT232H with the proper identity information to appear as a USB-to-JTAG interface.
 - Programs the CP2102N USB to serial chip with the name "LisaFPGA Serial B" to make it easy to identify when connecting to the Lisa's serial port.
-- Downloads the latest ESProFile firmware from its GitHub repo and uploads it to the onboard ESProFile.
-- Downloads the latest ESFloppy firmware from its GitHub repo and uploads it to the onboard ESFloppy.
+- Downloads the latest ESProFile firmware from its GitHub repo and uploads it to the onboard ESProFile. (In this fork, from [wottle/ESProFile](https://github.com/wottle/ESProFile).)
+- Downloads the latest ESFloppy firmware from its GitHub repo and uploads it to the onboard ESFloppy. (In this fork, from [wottle/ESFloppy](https://github.com/wottle/ESFloppy).)
 - Writes the LisaFPGA FPGA bitstream into the FPGA's configuration flash.
 
 If the script fails while programming any component of the board, just turn the board off and back on and then run the script again. I've seen this happen on rare occasions.

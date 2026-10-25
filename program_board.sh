@@ -18,6 +18,34 @@ warn()  { printf "${YELLOW}[WARN]${NC}  %s\n" "$*"; }
 die()   { printf "${RED}[FAIL]${NC}  %s\n" "$*" >&2; exit 1; }
 step()  { printf "\n${BOLD}══ %s ══${NC}\n" "$*"; }
 
+# ── ESP32 firmware sources ───────────────────────────────────────────────────
+# This fork's ESProFile and ESFloppy: Alex's firmware plus LisaNet (the SD card server the WiFi board uses, ESFloppy's
+# floppy remote and its dead-OLED guard). Without a WiFi board they behave like Alex's.
+ESPROFILE_REPO="https://github.com/wottle/ESProFile.git"
+ESFLOPPY_REPO="https://github.com/wottle/ESFloppy.git"
+
+# Clone repo $2 into $1, or bring an existing clone up to date. A clone of a different repository (an earlier run of
+# this script cloned Alex's) is repointed at $2 and reset to its main branch; that drops only local edits, such as
+# the pin-definition patch below, which is applied again afterwards.
+get_firmware_repo() {
+    local dir="$1" url="$2" name
+    name="$(basename "$dir")"
+    if [[ -d "$dir/.git" ]]; then
+        if [[ "$(git -C "$dir" remote get-url origin 2>/dev/null)" != "$url" ]]; then
+            info "$name clone points elsewhere; switching it to $url..."
+            git -C "$dir" remote set-url origin "$url"
+            git -C "$dir" fetch origin
+            git -C "$dir" checkout -f -B main origin/main
+        else
+            info "$name repo already exists locally, pulling latest..."
+            git -C "$dir" pull
+        fi
+    else
+        info "Cloning $name repo..."
+        git clone "$url" "$dir"
+    fi
+}
+
 # ── OS detection ─────────────────────────────────────────────────────────────
 OS="$(uname -s)"
 case "$OS" in
@@ -620,13 +648,7 @@ find_esp_ports
 step "Get ESProFile Firmware"
 
 ESPROFILE_DIR="$SCRIPT_DIR/ESProFile"
-if [[ -d "$ESPROFILE_DIR/.git" ]]; then
-    info "ESProFile repo already exists locally, pulling latest..."
-    git -C "$ESPROFILE_DIR" pull
-else
-    info "Cloning ESProFile repo..."
-    git clone https://github.com/alexthecat123/ESProFile.git "$ESPROFILE_DIR"
-fi
+get_firmware_repo "$ESPROFILE_DIR" "$ESPROFILE_REPO"
 
 # Edit ESProFile.ino: ensure LisaFPGA pin defs are active, not standalone ones.
 ESPROFILE_INO="$ESPROFILE_DIR/sw/ESProFile/ESProFile.ino"
@@ -687,13 +709,7 @@ sleep 3
 step "Get ESFloppy Firmware"
 
 ESFLOPPY_DIR="$SCRIPT_DIR/ESFloppy" # Change this line back to ESFloppy once it's working
-if [[ -d "$ESFLOPPY_DIR/.git" ]]; then
-    info "ESFloppy repo already exists locally, pulling latest..."
-    git -C "$ESFLOPPY_DIR" pull
-else
-    info "Cloning ESFloppy repo..."
-    git clone https://github.com/alexthecat123/ESFloppy.git "$ESFLOPPY_DIR"
-fi
+get_firmware_repo "$ESFLOPPY_DIR" "$ESFLOPPY_REPO"
 
 ESFLOPPY_INO_DIR="$ESFLOPPY_DIR/ESFloppy"
 ESFLOPPY_INO="$ESFLOPPY_INO_DIR/ESFloppy.ino"

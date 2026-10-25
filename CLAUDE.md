@@ -7,9 +7,15 @@
 `docs/superpowers/specs/2026-10-10-esp32-wifi-mode-design.md`) was fully merged; its local branch and worktree are gone.
 The rev 3 ESP32s have no antenna (see BLOCKER below), so the shipped design is an external XIAO ESP32-S3 on header J21.
 **To set up a board from scratch (flash the FPGA with `program_board.sh`, flash and wire the XIAO, join WiFi), follow
-`docs/lisanet_setup.md`;** XIAO details are in `firmware/lisanet_wifi/README.md`. Caveat recorded there: the committed
-`LisaFPGA.runs/impl_1/top.mcs` is still the 2026-10-07 build without LisaNet, and `program_board.sh` clones Alex's
-ESFloppy/ESProFile, not wottle's LisaNet forks. The history below is kept for the reasoning.
+`docs/lisanet_setup.md`;** XIAO details are in `firmware/lisanet_wifi/README.md`. Since 2026-10-25 the committed
+`LisaFPGA.runs/impl_1/top.mcs` / `top.bit` are the flashed FujiNet build (byte-identical to
+`tools/esp32_wifi_test/backup/fpga_fujinet_2026-10-22.{bit,mcs}`), and `program_board.sh` builds ESProFile/ESFloppy from
+wottle's forks (`ESPROFILE_REPO` / `ESFLOPPY_REPO`; an existing clone of Alex's is repointed and reset to the fork's
+`main`). **Rule: whenever an FPGA build is flashed and confirmed on the board, commit its `top.bit`, `top.mcs`, `top.prm`
+and the tracked impl_1 reports** (`git add -u LisaFPGA.runs`) -- `program_board.sh` flashes the committed `top.mcs`, and
+for most of October it silently shipped the 10-07 build while the source had moved on. Vivado's `reset_run` deletes
+`top.mcs` (it is made by `write_cfgmem`, not the run), so regenerate or copy it from the backup before committing.
+The history below is kept for the reasoning.
 
 **Windows progress (2026-10-10).** Built in the main checkout (`LisaFPGA` dir, branch checked out there), not a fresh
 clone: its IP state from the earlier USB/HDMI builds is already in place, so the one-time `tools/vivado_scripts` setup

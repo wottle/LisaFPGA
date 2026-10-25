@@ -26,7 +26,7 @@ serve its SD card over a fast serial link that passes through the FPGA.
 | 5 or 6 female-to-female Dupont wires | To J21. |
 | A USB-C cable | For the first flash, and optionally to power the XIAO. |
 | LisaFPGA FPGA firmware with LisaNet | This fork's `main` (the LisaNet builds: ESP32 MODE in the on-screen menu). The FujiNet needs the 2026-10-22 build or later (FPGA control version 3). |
-| ESFloppy and ESProFile LisaNet firmware | For SD card management and the floppy remote: the `main` branches of [wottle/ESFloppy](https://github.com/wottle/ESFloppy) and [wottle/ESProFile](https://github.com/wottle/ESProFile). Without them the Settings tab and the FujiNet still work, but the Files tab cannot reach the cards. |
+| ESFloppy and ESProFile LisaNet firmware | For SD card management and the floppy remote: the `main` branches of [wottle/ESFloppy](https://github.com/wottle/ESFloppy) and [wottle/ESProFile](https://github.com/wottle/ESProFile). This fork's `program_board.sh` installs them. Without them the Settings tab and the FujiNet still work, but the Files tab cannot reach the cards. |
 
 ## Wiring
 

@@ -26,33 +26,19 @@ Plug the board into the computer, switch the board on, and from the top of the c
 It installs what it needs, then programs the USB chips, ESProFile, ESFloppy and the FPGA bitstream. If any step fails,
 switch the board off and on and run it again. When it says it is done, switch the board off and on.
 
-Two things to check before you rely on it, because LisaNet needs both:
+Everything LisaNet needs comes from this one run:
 
-1. **The bitstream must be a LisaNet build.** The script flashes `LisaFPGA.runs/impl_1/top.mcs` from your checkout. The
-   `top.mcs` currently committed on this branch is the 2026-10-07 build, which **has no LisaNet** (no ESP32 MODE row, no
-   FujiNet). A LisaNet `top.mcs` (FujiNet build of 2026-10-22, FPGA control version 3, or later) must be in that path
-   before you run the script. If you build it yourself in Vivado, `write_cfgmem` writes it there.
-   To flash it alone, without the script:
+- **The FPGA bitstream** is the committed `LisaFPGA.runs/impl_1/top.mcs`: the LisaNet build with the FujiNet (FPGA
+  control version 3, built and flashed 2026-10-22). To flash it alone, without the script:
 
-   ```bash
-   openFPGALoader --cable ft232 --fpga-part xc7a100tcsg324 --write-flash LisaFPGA.runs/impl_1/top.mcs
-   ```
+  ```bash
+  openFPGALoader --cable ft232 --fpga-part xc7a100tcsg324 --write-flash LisaFPGA.runs/impl_1/top.mcs
+  ```
 
-2. **ESFloppy and ESProFile need the LisaNet firmware for the Files tab.** `program_board.sh` clones
-   `alexthecat123/ESFloppy` and `alexthecat123/ESProFile`, which cannot serve their SD cards to the XIAO. The LisaNet
-   versions are the `main` branches of [wottle/ESFloppy](https://github.com/wottle/ESFloppy) and
-   [wottle/ESProFile](https://github.com/wottle/ESProFile). After the script, flash those over the top. For each one,
-   clone the repo, then build and upload the sketch the same way the script does (board option `CDCOnBoot=cdc`):
-
-   ```bash
-   arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" ESFloppy/ESFloppy
-   arduino-cli upload  --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" -p <PORT> ESFloppy/ESFloppy
-   ```
-
-   For ESProFile the sketch folder is `ESProFile/sw/ESProFile`, and `PinDefs_LisaFPGA.h` must be the active include
-   (the script patches this for you; in your own clone, comment out `PinDefs_ESProFile.h` and comment in
-   `PinDefs_LisaFPGA.h`). Find the ports with `arduino-cli board list`: the board shows two ESP32-S3 devices, one per
-   emulator. Without this step the Settings tab and the FujiNet still work, but the Files tab cannot reach the cards.
+- **ESFloppy and ESProFile** are built from this fork's own firmware, the `main` branches of
+  [wottle/ESFloppy](https://github.com/wottle/ESFloppy) and [wottle/ESProFile](https://github.com/wottle/ESProFile):
+  Alex's firmware plus the SD card server the Files tab uses, ESFloppy's floppy remote and its dead-OLED guard. If an
+  earlier run of the script left clones of Alex's repositories in the checkout, it switches them over to these.
 
 **You should see:** the board boots to the Lisa display as usual. Hold LEFT + RIGHT for about 3 seconds and the
 on-screen menu appears. There is no ESP32 MODE row yet; it appears once the XIAO is connected.
