@@ -1,6 +1,42 @@
 # LisaFPGA — Project Notes for Claude
 
-## In progress: ESP32 WiFi mode ("LisaNet") — FPGA side BUILT, FLASHED AND HARDWARE-TESTED (2026-10-11); ESP32 firmware not started
+## Current state (2026-10-25) -- read this first
+
+**Git:** `fork/main` = `feature/lisanet-control` = `0720258` plus the commit adding this status (pushed to `mine` =
+github.com/wottle/LisaFPGA). Alex's
+upstream untouched. ESFloppy fork `main` = `bc71bad`, ESProFile fork `main` = `81f33f3` (both pushed, unchanged since
+2026-10-16).
+
+**On the board (all in flash, cold-booted):**
+- FPGA: the FujiNet build (control version 3) -- `fpga_fujinet_2026-10-22.{bit,mcs}` in `tools/esp32_wifi_test/backup/`,
+  and now also the COMMITTED `LisaFPGA.runs/impl_1/top.{bit,mcs}` (commit `9a3119d`). WNS +0.589 / WHS +0.048.
+- ESFloppy: LisaNet firmware (OLED guard + floppy remote), `bc71bad`. ESProFile: LisaNet firmware, `81f33f3`.
+- XIAO: last version CONFIRMED installed by the user is 0.11 (2026-10-22). The source is at **0.15** (the AI chat
+  endpoint, below); whether 0.12-0.15 are installed is NOT recorded -- ask before assuming.
+
+**Done 2026-10-25:**
+- Committed the production bitstream (the repo had been shipping the 10-07 build to `program_board.sh` users).
+- `program_board.sh` now builds ESProFile/ESFloppy from wottle's forks (`ESPROFILE_REPO` / `ESFLOPPY_REPO` at the top;
+  `get_firmware_repo()` repoints an existing clone of Alex's and resets it to the fork's `main` -- tested on a fresh
+  Alex clone; Windows "Filename too long" errors in that test came from Alex's Gerber paths, the script runs on
+  macOS/Linux only).
+- Docs: the user's `docs/lisanet_setup.md` (bare board -> WiFi, end to end) lost its two manual workarounds; README
+  "About This Fork" and the Programming section name the forks; `firmware/lisanet_wifi/README.md` says the LisaFPGA
+  power switch powers the XIAO through J21 pin 8 (with a USB-C alternative), and that the FujiNet is tested at **9600
+  and 19200 baud only** (the card offers up to 115200).
+
+**AI chat (XIAO 0.12-0.15, 2026-10-22, written in another session; documented in `firmware/lisanet_wifi/README.md`,
+"AI chat for Lisa programs"):** `chat.cpp` / `chatcore.cpp` / `chat_roots.h`. A Lisa program OPENs `chat://claude`,
+`chat://openai` or `chat://` on any N: unit, WRITEs a question, and STATUS/READs the answer (errors come back as
+`[error: ...]` text). API keys live on the XIAO (Settings tab "AI chat" card); **off by default** (0.14), certificates
+verified against pinned roots (0.13, needs NTP time), a STATUS straight after OPEN waits for the WRITE (0.15, for
+LisaFuji's FnNOpen). Host test: `firmware/lisanet_wifi/test/test_chatcore.cpp` (needs g++, not on this machine).
+
+**Open / next:** nothing in progress. Possible: confirm which XIAO version is installed; suggest the OLED guard to
+Alex (user's OK pending); test the FujiNet above 19200 if wanted; the pre-existing `frame_width` 1-bit bug and the
+thermal margin (85-86 C without a fan, fan planned) below.
+
+## LisaNet history (ESP32 WiFi mode) -- FPGA side built 2026-10-11, the XIAO firmware since; kept for the reasoning
 
 **Status (2026-10-25): LisaNet is built and merged into `fork/main`; the board runs the FujiNet build.** The original
 `feature/esp32-wifi-mode` branch (menu toggle on the ESFloppy ESP32, spec
