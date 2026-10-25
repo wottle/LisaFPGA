@@ -11,8 +11,10 @@ upstream untouched. ESFloppy fork `main` = `bc71bad`, ESProFile fork `main` = `8
 - FPGA: the FujiNet build (control version 3) -- `fpga_fujinet_2026-10-22.{bit,mcs}` in `tools/esp32_wifi_test/backup/`,
   and now also the COMMITTED `LisaFPGA.runs/impl_1/top.{bit,mcs}` (commit `9a3119d`). WNS +0.589 / WHS +0.048.
 - ESFloppy: LisaNet firmware (OLED guard + floppy remote), `bc71bad`. ESProFile: LisaNet firmware, `81f33f3`.
-- XIAO: last version CONFIRMED installed by the user is 0.11 (2026-10-22). The source is at **0.15** (the AI chat
-  endpoint, below); whether 0.12-0.15 are installed is NOT recorded -- ask before assuming.
+- XIAO: **0.15 installed** (user, 2026-10-25), matching the source. The user's XIAO came from the *Seeed Studio XIAO
+  ESP32S3 & Wio-SX1262 Meshtastic LoRa Dev Kit* (Amazon a.co/d/00z6Lj4b): only the XIAO is used, with the kit's 2.4 GHz
+  antenna; it ships pre-flashed with Meshtastic (hence the manual B+R download mode on the first flash). Noted in
+  `firmware/lisanet_wifi/README.md`'s parts list.
 
 **Done 2026-10-25:**
 - Committed the production bitstream (the repo had been shipping the 10-07 build to `program_board.sh` users).
@@ -32,7 +34,7 @@ upstream untouched. ESFloppy fork `main` = `bc71bad`, ESProFile fork `main` = `8
 verified against pinned roots (0.13, needs NTP time), a STATUS straight after OPEN waits for the WRITE (0.15, for
 LisaFuji's FnNOpen). Host test: `firmware/lisanet_wifi/test/test_chatcore.cpp` (needs g++, not on this machine).
 
-**Open / next:** nothing in progress. Possible: confirm which XIAO version is installed; suggest the OLED guard to
+**Open / next:** nothing in progress. Possible: suggest the OLED guard to
 Alex (user's OK pending); test the FujiNet above 19200 if wanted; the pre-existing `frame_width` 1-bit bug and the
 thermal margin (85-86 C without a fan, fan planned) below.
 

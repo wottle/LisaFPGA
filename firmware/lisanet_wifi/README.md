@@ -22,7 +22,7 @@ serve its SD card over a fast serial link that passes through the FPGA.
 
 | Part | Notes |
 |---|---|
-| **Seeed Studio XIAO ESP32S3** | The plain XIAO ESP32S3 (the "Sense" version with the camera also works). It has 8 MB of flash, which the firmware needs for over-the-air updates. **Fit the antenna that comes with it** (the small U.FL patch antenna): without it WiFi range is a few centimetres. |
+| **Seeed Studio XIAO ESP32S3** | The plain XIAO ESP32S3 (the "Sense" version with the camera also works). It has 8 MB of flash, which the firmware needs for over-the-air updates. **Fit the antenna that comes with it** (the small U.FL patch antenna): without it WiFi range is a few centimetres. Known to work: the *Seeed Studio XIAO ESP32S3 & Wio-SX1262 Meshtastic LoRa Dev Kit*. Only its XIAO is used (not the Wio-SX1262 LoRa board); fit the kit's 2.4 GHz WiFi antenna to the XIAO, not the LoRa one. It arrives running Meshtastic, which the first flash replaces. |
 | 5 or 6 female-to-female Dupont wires | To J21. |
 | A USB-C cable | For the first flash, and optionally to power the XIAO. |
 | LisaFPGA FPGA firmware with LisaNet | This fork's `main` (the LisaNet builds: ESP32 MODE in the on-screen menu). The FujiNet needs the 2026-10-22 build or later (FPGA control version 3). |
