@@ -2,15 +2,14 @@
 
 ## In progress: ESP32 WiFi mode ("LisaNet") — FPGA side BUILT, FLASHED AND HARDWARE-TESTED (2026-10-11); ESP32 firmware not started
 
-**Branch:** `feature/esp32-wifi-mode` (off `fork/main` @ `a01fff7`; worktree at `.worktrees/esp32-wifi` in the
-original checkout). **Spec: `docs/superpowers/specs/2026-10-10-esp32-wifi-mode-design.md`** — read it first.
-Idea: an on-screen-menu `ESP32 MODE` toggle (FLOPPY/WIFI); in WIFI the ESFloppy ESP32-S3 restarts into a WiFi
-personality and appears as a virtual modem on Lisa **Serial A** (SCC channel A muxed to the ESP32 over spare
-`ESFLOPPY_COMM_BUS` lines), with a Lisa-side LisaNet app, SD-card file management first, network client/SLIP later.
-FPGA side is written on this branch (menu row `ESP32 MODE`, settings bit 72, comm-bus [5:3] = MODE/TX/RX, SCC-A mux in
-`top.sv`, XDC pull-up + false paths) but has had no Vivado run — **first step on the Windows machine: `xvlog` syntax check, then
-synth, and check the two new false paths by effect.** O1/O3/O4 are resolved in the spec; O2 (flow control) and the ESP32
-firmware are still open.
+**Status (2026-10-25): LisaNet is built and merged into `fork/main`; the board runs the FujiNet build.** The original
+`feature/esp32-wifi-mode` branch (menu toggle on the ESFloppy ESP32, spec
+`docs/superpowers/specs/2026-10-10-esp32-wifi-mode-design.md`) was fully merged; its local branch and worktree are gone.
+The rev 3 ESP32s have no antenna (see BLOCKER below), so the shipped design is an external XIAO ESP32-S3 on header J21.
+**To set up a board from scratch (flash the FPGA with `program_board.sh`, flash and wire the XIAO, join WiFi), follow
+`docs/lisanet_setup.md`;** XIAO details are in `firmware/lisanet_wifi/README.md`. Caveat recorded there: the committed
+`LisaFPGA.runs/impl_1/top.mcs` is still the 2026-10-07 build without LisaNet, and `program_board.sh` clones Alex's
+ESFloppy/ESProFile, not wottle's LisaNet forks. The history below is kept for the reasoning.
 
 **Windows progress (2026-10-10).** Built in the main checkout (`LisaFPGA` dir, branch checked out there), not a fresh
 clone: its IP state from the earlier USB/HDMI builds is already in place, so the one-time `tools/vivado_scripts` setup
@@ -363,6 +362,14 @@ Lisa core or the CPU SPEED setting. Upstream's own June estimate was 1.18 W (MMC
 resolution: read the temperature on our build, JTAG-load upstream's committed bitstream (temporary), let it settle
 10-15 min, read again. Similar result -> the fix is a heatsink/airflow; much cooler -> trim what we added (e.g. share
 MMCMs). A small 15x15 mm stick-on heatsink on the package is the likely cure either way.
+
+## Parked: unreviewed security findings in `tools/usb_fw/usb_xfer.c` (2026-10-10)
+
+An automated review flagged two issues in `tools/usb_fw/usb_xfer.c` (soft-CPU USB host firmware, commit `e3038b5`, not
+touched by the WiFi work): a possible **unbounded loop** and a possible **stack overflow**. **Neither has been verified**;
+the file was not read, so either may be a false positive. Both need a hostile or malformed USB device on a keyboard/mouse
+port, so the risk is local. The user deferred it. If resumed: read the file, confirm each finding, fix on a separate
+branch off `fork/main`, and re-test USB on hardware.
 
 ## Recently completed: merged upstream (ESFloppy release) into feature/settings-flash-persistence,
 ## moved the on-screen menu's summon gesture off OK
