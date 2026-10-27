@@ -21,6 +21,7 @@
 #include "cJSON.h"
 #include "chat.h"
 #include "chatcore.h"
+#include "drivecache.h"
 
 namespace fujinet {
 
@@ -748,6 +749,7 @@ void begin(HardwareSerial &p) {
 }
 
 bool routed() { return isRouted; }
+uint32_t lastActivityMs() { return lastByteMs; }
 
 void noteRouted(bool on) {
     if (on == isRouted) return;
@@ -799,7 +801,7 @@ void poll() {
         lastCheckMs = now;
         fpgactl::Status s;
         int st = fpgactl::status(s, 1);
-        if (st == fpgactl::OK) { noteRouted(s.serialB != 0); checkEvery = 10000; }
+        if (st == fpgactl::OK) { noteRouted(s.serialB != 0); drivecache::noteMode(s.espMode); checkEvery = 10000; }
         else checkEvery = 60000;                        // not answering (an older FPGA build): try again in a minute
     }
 }

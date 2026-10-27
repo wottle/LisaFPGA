@@ -59,6 +59,7 @@
 #include "fpgactl.h"
 #include "ota.h"
 #include "fujinet.h"
+#include "drivecache.h"
 #include "chat.h"
 
 namespace web {
@@ -436,6 +437,7 @@ static void handleFpgaStatus() {
              B(s.hasMachine), B(s.scanlines), B(s.scanlinesJumper), B(s.inverse), B(s.inverseJumper), B(s.rom3ASwitch),
              B(s.twiggy), B(s.twiggySwitch), s.ram, s.ramSwitch, B(s.ramUserSet), s.serialB);
     if (s.version >= 3) fujinet::noteRouted(s.serialB != 0);
+    drivecache::noteMode(s.espMode);
     server.send(200, "application/json", o);
 }
 
@@ -445,6 +447,7 @@ static void handleFpgaSet() {
     if (reg < 1 || reg == 7 || reg > 13 || value < 0 || value > 2047) { sendFpgaResult(fpgactl::BAD_REQUEST); return; }
     int s = fpgactl::set((uint8_t)reg, (uint16_t)value);
     if (s == fpgactl::OK && reg == fpgactl::REG_ESPMODE) lastGood = 0;   // a different SD server (or none) now
+    if (s == fpgactl::OK && reg == fpgactl::REG_ESPMODE) drivecache::noteMode((uint8_t)value);
     if (s == fpgactl::OK && reg == fpgactl::REG_SERIALB) fujinet::noteRouted(value != 0);
     sendFpgaResult(s);
 }
@@ -555,7 +558,20 @@ static void handleDriveStatus() {
              ",\"ejecting\":" + B(s.drive[d].ejecting) + ",\"name\":\"" + jsonEscape(s.drive[d].name) + "\"}";
     }
     o += "],\"fw\":\"" + jsonEscape(s.firmware) + "\"}";
+    drivecache::noteDriveType(s.emulMode, s.twiggy);
     server.send(200, "application/json", o);
+}
+
+// The images the drive takes, kept by drivecache (read in the background in Normal mode)
+static void handleDriveImages() {
+    if (!authorized()) return;
+    server.send(200, "application/json", drivecache::json());
+}
+
+static void handleDriveRescan() {
+    if (!authorized()) return;
+    drivecache::rescan();
+    server.send(200, "application/json", drivecache::json());
 }
 
 static void handleDriveLs() {
@@ -658,6 +674,8 @@ void begin() {
     server.on("/api/chat/test", HTTP_GET, handleChatTestPoll);
     server.on("/api/chat/reset", HTTP_POST, handleChatReset);
     server.on("/api/drive", HTTP_GET, handleDriveStatus);
+    server.on("/api/drive/images", HTTP_GET, handleDriveImages);
+    server.on("/api/drive/images", HTTP_POST, handleDriveRescan);
     server.on("/api/drive/ls", HTTP_GET, handleDriveLs);
     server.on("/api/drive/insert", HTTP_POST, handleDriveInsert);
     server.on("/api/drive/eject", HTTP_POST, handleDriveEject);

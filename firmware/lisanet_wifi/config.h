@@ -22,11 +22,11 @@
 #pragma once
 
 #ifndef LISANET_WIFI_VERSION         // a test build can override it with -D
-#define LISANET_WIFI_VERSION "0.16"
+#define LISANET_WIFI_VERSION "0.17"
 #endif
 // What this version brought, shown next to the version on the web page. Rewrite it with every new version.
 #ifndef LISANET_WIFI_NOTES
-#define LISANET_WIFI_NOTES   "Lisa programs can set the FujiNet speed (LisaFuji 1.2)"
+#define LISANET_WIFI_NOTES   "the Insert a disk list is read in the background and kept"
 #endif
 
 #define LISA_RX_PIN   1        // D0

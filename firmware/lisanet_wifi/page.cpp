@@ -134,7 +134,7 @@ A new version has to run for 20 s before it is kept: if it crashes sooner, the b
 <dialog id="ddlg"><p><b>Insert a disk</b> <span class="mut" id="dfor"></span></p>
 <div class="row"><select id="dsel" style="max-width:100%"><option value="">Scanning the card...</option></select></div>
 <div class="mut" id="dstat"></div>
-<div class="bar"><button id="dload" disabled>Load Disk</button><button id="dcancel">Cancel</button></div></dialog>
+<div class="bar"><button id="dload" disabled>Load Disk</button><button id="dcancel">Cancel</button><button id="drescan" title="Read the card again (only needed if the SD card was swapped)">Rescan</button></div></dialog>
 <dialog id="rdlg"><p><b>Keep this resolution?</b></p><p class="mut">If the display went blank, do nothing: it goes back in <span id="rsec">15</span> s.</p>
 <div class="bar"><button id="rkeep">Keep</button><button id="rrevert">Go back now</button></div></dialog>
 </main><script>
@@ -428,21 +428,25 @@ function deject(v,force){
  if(force&&!confirm('Force-eject '+base(v.name)+'? This is like pulling the disk out of the drive: if the Lisa is using it, unsaved changes are lost and the disk may need repairing. Eject it from LOS instead when you can.'))return;
  fdo(async()=>{await fpga('/api/drive/eject?drive='+v.n+'&force='+(force?1:0),{method:'POST'});msg(force?'Ejected.':'Eject requested: the Lisa ejects the disk when it is ready.');dRetryAt=0;await drefresh();});}
 // Insert: one dropdown of every image on the card that this drive mode accepts (the drive's own filter, as on its
-// OLED), found by walking the folders (hidden ones excluded, 4 levels deep), then Load Disk.
+// OLED; hidden folders excluded, 4 levels deep), then Load Disk. The WiFi board reads the card in the background in
+// Normal mode and keeps the list (/api/drive/images), so it is normally there at once; while it is still being read,
+// the dialog shows how far it has got and fills in when it is done.
 let dDrive=1,dScan=0;
-async function dscanAll(){const found=[];
- const walk=async(p,depth)=>{const r=await fpga('/api/drive/ls?path='+encodeURIComponent(p));
-  for(const e of r.entries){if(e.n.startsWith('.'))continue;const full=join(p,e.n);
-   if(e.d){if(depth<4)await walk(full,depth+1);}else found.push({p:full,s:e.s});}};
- await walk('/',0);return found.sort((a,b)=>a.p.localeCompare(b.p));}
+function derr(e,my){if(my!==dScan)return;$('dsel').innerHTML='<option value="">Could not read the card</option>';$('dstat').textContent=e.message;}
+function dfill(r,my){if(my!==dScan||!$('ddlg').open)return;const s=$('dsel');$('dload').disabled=true;
+ if(r.state!=='ready'){s.innerHTML='<option value="">Reading the card for disk images...</option>';
+  $('dstat').textContent=r.state==='scanning'?'Reading the card: '+r.folders+' folder'+(r.folders===1?'':'s')+' so far.':'Waiting for ESFloppy to answer...';
+  setTimeout(()=>fpga('/api/drive/images').then(x=>dfill(x,my)).catch(e=>derr(e,my)),1000);return;}
+ s.innerHTML='';const list=r.images;
+ s.add(new Option(list.length?'Choose a disk image...':'No disk images this drive can use',''));
+ for(const f of list)s.add(new Option(f.p.replace(/^\//,'')+'  ('+size(f.s)+')',f.p));
+ $('dstat').textContent=list.length+' image'+(list.length===1?'':'s')+' found'+(r.full?' (the list is full: only the first 400 are shown)':'')+'.';}
 function dpick(n,twiggy){dDrive=n;$('dfor').textContent=twiggy?(n===0?'into the upper drive':'into the lower drive'):'';
- const s=$('dsel'),L=$('dload'),my=++dScan;s.innerHTML='<option value="">Scanning the card for disk images...</option>';L.disabled=true;
- $('dstat').textContent='Each image is checked, so this can take a few seconds.';$('ddlg').showModal();
- dscanAll().then(list=>{if(my!==dScan)return;s.innerHTML='';
-  s.add(new Option(list.length?'Choose a disk image...':'No disk images this drive can use',''));
-  for(const f of list)s.add(new Option(f.p.replace(/^\//,'')+'  ('+size(f.s)+')',f.p));
-  $('dstat').textContent=list.length+' image'+(list.length===1?'':'s')+' found.';})
- .catch(e=>{if(my!==dScan)return;s.innerHTML='<option value="">Could not read the card</option>';$('dstat').textContent=e.message;});}
+ const my=++dScan;$('dsel').innerHTML='<option value="">Loading the list of disk images...</option>';$('dload').disabled=true;
+ $('dstat').textContent='';$('ddlg').showModal();
+ fpga('/api/drive/images').then(r=>dfill(r,my)).catch(e=>derr(e,my));}
+$('drescan').onclick=()=>{const my=++dScan;$('dsel').innerHTML='<option value="">Reading the card for disk images...</option>';$('dload').disabled=true;
+ fpga('/api/drive/images',{method:'POST'}).then(r=>dfill(r,my)).catch(e=>derr(e,my));};
 $('dsel').onchange=()=>{$('dload').disabled=!$('dsel').value;};
 $('dload').onclick=()=>{const p=$('dsel').value;if(p)dinsert(p);};
 $('dcancel').onclick=()=>{dScan++;$('ddlg').close();};

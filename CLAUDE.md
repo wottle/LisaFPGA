@@ -11,7 +11,13 @@ upstream untouched. ESFloppy fork `main` = `bc71bad`, ESProFile fork `main` = `8
 - FPGA: the FujiNet build (control version 3) -- `fpga_fujinet_2026-10-22.{bit,mcs}` in `tools/esp32_wifi_test/backup/`,
   and now also the COMMITTED `LisaFPGA.runs/impl_1/top.{bit,mcs}` (commit `9a3119d`). WNS +0.589 / WHS +0.048.
 - ESFloppy: LisaNet firmware (OLED guard + floppy remote), `bc71bad`. ESProFile: LisaNet firmware, `81f33f3`.
-- XIAO: **0.16 installed and working** (user, 2026-10-26), matching the source. 0.16: Lisa programs can set the FujiNet
+- XIAO: **0.17 installed and working** (user, 2026-10-26), matching the source. 0.17: `drivecache.cpp` reads the
+  floppy images ESFloppy's drive accepts in the background (Normal mode only, one folder per step, only after 3 s with
+  no FujiNet traffic, growing backoff when ESFloppy does not answer) and keeps them; `/api/drive/images` (GET; POST =
+  Rescan) feeds the Insert a disk dialog instantly. Dropped when the drives leave Normal (re-read ~12 s after returning)
+  or the drive type changes. NOTE: after git checkout these sources have CRLF line endings, so `perl -0pi` patterns
+  ending in `\n` silently fail to match -- use the Edit tool (or `\r?\n`) and check that each change applied.
+  0.16: Lisa programs can set the FujiNet
   speed (LisaFuji 1.2 and siblings POST `serial_baud=` then `resetfuji=` to `http://<adapter IP>/config`, the real FujiNet
   web form; `fujinet.cpp` answers its OWN /config itself, since the XIAO's single-task web server cannot answer a
   request the same task is making; the speed switches after the reset's CLOSE reply; not saved until Save settings),

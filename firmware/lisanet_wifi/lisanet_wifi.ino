@@ -8,6 +8,7 @@
 #include "wifisetup.h"
 #include "ota.h"
 #include "fujinet.h"
+#include "drivecache.h"
 #include "chat.h"
 
 static HardwareSerial LinkPort(1);   // to ESFloppy's SD server
@@ -32,6 +33,7 @@ void setup() {
 void loop() {
     atmodem::poll();
     fujinet::poll();
+    drivecache::poll();               // the floppy images, read in the background for the Insert a disk dialog
     chat::poll();
     web::poll();
     wifisetup::poll();

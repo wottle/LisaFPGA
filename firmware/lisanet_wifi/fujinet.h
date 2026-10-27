@@ -19,6 +19,7 @@ void begin(HardwareSerial &port);   // the UART atmodem also uses (D0/D1), alrea
 void poll();                        // call from loop()
 
 bool routed();                      // the FPGA reports Serial B on J21: this module owns the port
+uint32_t lastActivityMs();           // millis() of the last byte from the Lisa on Serial B (0: none yet)
 void noteRouted(bool on);           // from a fresh FPGA status (web page, or this module's own check)
 
 uint32_t baud();
