@@ -11,9 +11,13 @@ upstream untouched. ESFloppy fork `main` = `bc71bad`, ESProFile fork `main` = `8
 - FPGA: the FujiNet build (control version 3) -- `fpga_fujinet_2026-10-22.{bit,mcs}` in `tools/esp32_wifi_test/backup/`,
   and now also the COMMITTED `LisaFPGA.runs/impl_1/top.{bit,mcs}` (commit `9a3119d`). WNS +0.589 / WHS +0.048.
 - ESFloppy: LisaNet firmware (OLED guard + floppy remote), `bc71bad`. ESProFile: LisaNet firmware, `81f33f3`.
-- XIAO: **0.15 installed** (user, 2026-10-25), matching the source. The user's XIAO came from the *Seeed Studio XIAO
+- XIAO: **0.16 installed and working** (user, 2026-10-26), matching the source. 0.16: Lisa programs can set the FujiNet
+  speed (LisaFuji 1.2 and siblings POST `serial_baud=` then `resetfuji=` to `http://<adapter IP>/config`, the real FujiNet
+  web form; `fujinet.cpp` answers its OWN /config itself, since the XIAO's single-task web server cannot answer a
+  request the same task is making; the speed switches after the reset's CLOSE reply; not saved until Save settings),
+  plus NET_SET_HTTP_MODE (0x4D, param 1: mode 4 post data, 3 headers). The user's XIAO came from the *Seeed Studio XIAO
   ESP32S3 & Wio-SX1262 Meshtastic LoRa Dev Kit* (Amazon a.co/d/00z6Lj4b): only the XIAO is used, with the kit's 2.4 GHz
-  antenna; it ships pre-flashed with Meshtastic (hence the manual B+R download mode on the first flash). Noted in
+  antenna (the LARGER of its two, shipped on the XIAO; the small rectangular one is the LoRa board's); it ships pre-flashed with Meshtastic (hence the manual B+R download mode on the first flash). Noted in
   `firmware/lisanet_wifi/README.md`'s parts list.
 
 **Done 2026-10-25:**

@@ -282,6 +282,9 @@ struct Unit {
     bool chat = false;              // a chat:// unit (chat.cpp): WRITE collects the question, STATUS/READ deliver the answer
     int chatKind = 0;               // 0 default provider, 1 Claude, 2 OpenAI
     bool chatAsked = false;         // the question has been handed to chat.cpp
+    uint8_t httpMode = 0;           // SET_HTTP_MODE: 0 body, 1 collect headers, 2 get headers, 3 set headers, 4 post data
+    String headers;                 // "Name: value" lines WRITE gave in mode 3, sent with the request
+    bool ownConfig = false;         // a POST to this board's own /config page (the FujiNet settings form), answered here
 };
 static Unit units[8];
 
@@ -322,11 +325,102 @@ static uint8_t httpError(int code) {
     return ST_SERVER_GENERAL;
 }
 
+// ---- The FujiNet's own settings page ------------------------------------------------------------
+// Lisa programs (LisaFuji 1.2 and its siblings) change a FujiNet's line speed the way its web page does: two POSTs to
+// http://<the adapter's address>/config, "serial_baud=19200" and then "resetfuji=resetfuji" (the page's Reset FujiNet
+// button; a real FujiNet only uses the new speed after that restart). The address they use is this board's own, from
+// the adapter config reply, so the request would come back to this board -- whose web server cannot answer while this
+// one task is waiting for it. It is answered here instead. The new speed applies once the reset's reply has gone out,
+// and is kept like any other card setting: by Save settings. (Each of those programs finds the speed at launch anyway.)
+static uint32_t pendingBaud = 0;   // asked for by serial_baud=, used at the reset
+static bool speedSwitch = false;   // a reset asked for pendingBaud
+static uint32_t speedSwitchAt = 0; // ...by this time, if the Lisa never closes the unit
+
+static bool validBaud(uint32_t b) {
+    return b == 1200 || b == 2400 || b == 4800 || b == 9600 || b == 19200 || b == 38400 || b == 57600 || b == 115200;
+}
+
+static bool isOwnConfigUrl(const String &url) {
+    if (!url.startsWith("http://")) return false;
+    String rest = url.substring(7);
+    int slash = rest.indexOf('/');
+    String host = slash < 0 ? rest : rest.substring(0, slash);
+    String path = slash < 0 ? String("/") : rest.substring(slash);
+    int colon = host.indexOf(':');
+    if (colon >= 0) {
+        if (host.substring(colon + 1) != "80") return false;
+        host = host.substring(0, colon);
+    }
+    host.toLowerCase();
+    int q = path.indexOf('?');
+    if (q >= 0) path = path.substring(0, q);
+    if (path != "/config") return false;
+    return host == WiFi.localIP().toString() || host == MDNS_NAME || host == MDNS_NAME ".local" || host == "localhost" ||
+           host == "127.0.0.1";
+}
+
+static String formDecode(const String &s) {
+    String o;
+    for (size_t i = 0; i < s.length(); i++) {
+        char c = s[i];
+        if (c == '+') o += ' ';
+        else if (c == '%' && i + 2 < s.length()) { o += (char)strtol(s.substring(i + 1, i + 3).c_str(), nullptr, 16); i += 2; }
+        else o += c;
+    }
+    return o;
+}
+
+static void ownConfig(Unit &u, int n) {
+    u.done = true;
+    u.err = ST_SUCCESS;
+    String form = formDecode(String(u.tx.c_str()));
+    u.tx.clear();
+    int start = 0;
+    while (start < (int)form.length()) {
+        int amp = form.indexOf('&', start);
+        if (amp < 0) amp = form.length();
+        String pair = form.substring(start, amp);
+        start = amp + 1;
+        int eq = pair.indexOf('=');
+        String key = eq < 0 ? pair : pair.substring(0, eq), val = eq < 0 ? String("") : pair.substring(eq + 1);
+        key.trim();
+        val.trim();
+        if (!key.length()) continue;
+        if (key == "serial_baud") {
+            uint32_t b = val.toInt();
+            if (validBaud(b)) { pendingBaud = b; logf("N%d: the Lisa asks for %lu baud (used at the FujiNet reset)", n, (unsigned long)b); }
+            else { u.err = ST_CLIENT_GENERAL; logf("N%d: the Lisa asks for %s baud: not a rate offered here", n, val.c_str()); }
+        } else if (key == "resetfuji") {
+            if (pendingBaud && pendingBaud != curBaud) {
+                speedSwitch = true;
+                speedSwitchAt = millis() + 2000;
+                logf("N%d: FujiNet reset: switching to %lu baud", n, (unsigned long)pendingBaud);
+            } else logf("N%d: FujiNet reset: the speed stays %lu baud", n, (unsigned long)curBaud);
+        } else logf("N%d: FujiNet setting %s is not supported here; ignored", n, key.c_str());
+    }
+}
+
+static void resetRx();   // the SLIP receiver, below
+
+// Once the reset's reply has been sent (its CLOSE, or a moment later): the new speed, at both ends from here on
+static void applySpeedSwitch() {
+    if (!speedSwitch) return;
+    speedSwitch = false;
+    port->flush();                                       // the last reply goes out at the old speed
+    setBaud(pendingBaud);
+    pendingBaud = 0;
+    resetRx();
+    closeAll();
+    while (port->available()) port->read();
+    logf("now at %lu baud, as the Lisa asked (Save settings keeps it)", (unsigned long)curBaud);
+}
+
 // Run the request: on the first STATUS, READ or PARSE (as fujinet-firmware does), or at CLOSE for a write that was
 // never read back. The body is not read here; pull() takes it as the Lisa asks.
 static void perform(Unit &u, int n) {
     if (u.performed) return;
     u.performed = true;
+    if (u.ownConfig) { ownConfig(u, n); return; }
     if (WiFi.status() != WL_CONNECTED) { u.err = ST_NOT_CONNECTED; u.done = true; logf("N%d: no WiFi", n); return; }
     bool tls = u.url.startsWith("https://");
     if (tls) { auto *c = new WiFiClientSecure(); c->setInsecure(); u.client = c; }   // no certificate store here
@@ -338,6 +432,14 @@ static void perform(Unit &u, int n) {
     u.http->setUserAgent("LisaNet-FujiNet/" LISANET_WIFI_VERSION);
     if (!u.http->begin(*u.client, u.url)) { u.err = ST_INVALID_SPEC; u.done = true; release(u); return; }
     if (u.login.length()) u.http->setAuthorization(u.login.c_str(), u.password.c_str());
+    for (int i = 0; i < (int)u.headers.length();) {    // SET_HTTP_MODE 3's "Name: value" lines
+        int nl = u.headers.indexOf('\n', i);
+        if (nl < 0) nl = u.headers.length();
+        String line = u.headers.substring(i, nl);
+        i = nl + 1;
+        int c = line.indexOf(':');
+        if (c > 0) { String v = line.substring(c + 1); v.trim(); String k = line.substring(0, c); k.trim(); u.http->addHeader(k, v); }
+    }
     int code = u.http->sendRequest(u.method.c_str(), (uint8_t *)u.tx.data(), u.tx.size());
     u.tx.clear();
     u.err = httpError(code);
@@ -483,7 +585,9 @@ static void netDevice(const Packet &pk) {
                     return;
             }
             u.open = true;
-            logf("N%d: OPEN %s mode %u trans %u", n, u.url.c_str(), u.mode, u.trans);
+            u.ownConfig = isOwnConfigUrl(u.url);
+            logf("N%d: OPEN %s mode %u trans %u%s", n, u.url.c_str(), u.mode, u.trans,
+                 u.ownConfig ? " (this board's FujiNet settings)" : "");
             ack(pk);
             break;
         }
@@ -526,8 +630,18 @@ static void netDevice(const Packet &pk) {
         case 0x57: {                                    // WRITE: data to send with the request
             if (!u.open || u.performed) { nak(pk); return; }
             std::string d((const char *)pk.data, pk.dataLen);
+            if (u.httpMode == 3) {                      // request headers, one "Name: value" per line
+                std::string h = d;
+                replaceAll(h, "\r\n", "\n");
+                replaceAll(h, "\r", "\n");
+                u.headers += String(h.c_str());
+                if (u.headers.length() && u.headers[u.headers.length() - 1] != '\n') u.headers += '\n';
+                ack(pk);
+                break;
+            }
+            if (u.httpMode == 1) { ack(pk); break; }    // header names to collect: not supported, ignored
             if (u.trans >= 1 && u.trans <= 3) replaceAll(d, u.eol, netEol(u.trans));
-            u.tx += d;
+            u.tx += d;                                  // the body (mode 0, or post data in mode 4)
             ack(pk);
             break;
         }
@@ -535,7 +649,16 @@ static void netDevice(const Packet &pk) {
             if (u.open && !u.chat && !u.performed && u.method != "GET") perform(u, n);
             reset(u);
             ack(pk);
+            applySpeedSwitch();                         // after a FujiNet reset: the new speed, once this reply is out
             break;
+        case 0x4D: {                                    // SET_HTTP_MODE: parameter 1 is the channel mode
+            uint8_t m = pk.nparam >= 2 ? pk.p(1) : pk.p(0);
+            if (!u.open || u.chat || m > 4) { nak(pk); return; }
+            u.httpMode = m;                             // post data written in mode 4 survives the switch back to 0
+            if (m == 1 || m == 2) logf("N%d: HTTP header mode %u is not supported here; ignored", n, m);
+            ack(pk);
+            break;
+        }
         case 0x54: u.trans = pk.p(0) & 0x03; ack(pk); break;                 // TRANSLATION
         case 0x4C:                                                           // SET_EOL
             if (pk.dataLen) { u.eol = std::string((const char *)pk.data, pk.dataLen); u.jsonEol = u.eol; }
@@ -583,6 +706,7 @@ static void netDevice(const Packet &pk) {
 static uint8_t frame[MAX_PACKET];
 static size_t frameLen = 0;
 static bool inFrame = false, escaped = false, overflow = false;
+static void resetRx() { inFrame = escaped = overflow = false; frameLen = 0; }
 
 static void handleFrame() {
     Packet pk;
@@ -667,6 +791,7 @@ void poll() {
     if (isRouted) {
         while (port->available()) { lastByteMs = millis(); rxByte(port->read()); }
     }
+    if (speedSwitch && (int32_t)(millis() - speedSwitchAt) >= 0 && !inFrame) applySpeedSwitch();   // no CLOSE came
     // Learn whether the FPGA has Serial B on J21 (the web page reports it too, every few seconds while open). Only
     // between packets, and quickly: one attempt, so an FPGA without the control channel costs at most ~0.4 s a minute.
     uint32_t now = millis();

@@ -22,7 +22,7 @@ serve its SD card over a fast serial link that passes through the FPGA.
 
 | Part | Notes |
 |---|---|
-| **Seeed Studio XIAO ESP32S3** | The plain XIAO ESP32S3 (the "Sense" version with the camera also works). It has 8 MB of flash, which the firmware needs for over-the-air updates. **Fit the antenna that comes with it** (the small U.FL patch antenna): without it WiFi range is a few centimetres. Known to work: the *Seeed Studio XIAO ESP32S3 & Wio-SX1262 Meshtastic LoRa Dev Kit*. Only its XIAO is used (not the Wio-SX1262 LoRa board); fit the kit's 2.4 GHz WiFi antenna to the XIAO, not the LoRa one. It arrives running Meshtastic, which the first flash replaces. |
+| **Seeed Studio XIAO ESP32S3** | The plain XIAO ESP32S3 (the "Sense" version with the camera also works). It has 8 MB of flash, which the firmware needs for over-the-air updates. **Fit the antenna that comes with it** (the small U.FL patch antenna): without it WiFi range is a few centimetres. Known to work: the *Seeed Studio XIAO ESP32S3 & Wio-SX1262 Meshtastic LoRa Dev Kit*. Only its XIAO is used (not the Wio-SX1262 LoRa board); keep the XIAO's own 2.4 GHz WiFi antenna on it (the larger of the kit's two; the small rectangular one belongs to the LoRa board). It arrives running Meshtastic, which the first flash replaces. |
 | 5 or 6 female-to-female Dupont wires | To J21. |
 | A USB-C cable | For the first flash, and optionally to power the XIAO. |
 | LisaFPGA FPGA firmware with LisaNet | This fork's `main` (the LisaNet builds: ESP32 MODE in the on-screen menu). The FujiNet needs the 2026-10-22 build or later (FPGA control version 3). |
@@ -179,6 +179,11 @@ The web page uses HTTP Basic authentication over plain HTTP: fine on a home netw
    (Central Europe). The network clock comes from internet time.
    The FujiNet has only been tested at **9600 and 19200 baud**. The card offers rates up to 115200, but higher ones are
    untested.
+   Lisa programs can also change the speed themselves (LisaFuji 1.2 and its sibling tools: the Speed or Network menu).
+   They do it the way a real FujiNet's web page does, a POST of `serial_baud=` and then `resetfuji` to the adapter's
+   `/config`, which this board answers itself; the speed changes once the reset is answered. A speed set from the Lisa
+   applies at once but, like the card's own settings, is only kept across a restart by **Save settings**. Those
+   programs look for the adapter at 9600 and at 19200 when they start, so they find it either way.
 3. Press **Save settings** to keep all three.
 4. In Lisa Office System, set Serial B to **Serial Cable** in the Preferences tool, then run the program.
 
