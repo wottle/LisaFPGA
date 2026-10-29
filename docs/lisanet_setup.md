@@ -45,24 +45,23 @@ on-screen menu appears. There is no ESP32 MODE row yet; it appears once the XIAO
 
 ## 2. Flash the XIAO ESP32-S3 (once, over USB)
 
-Do this before wiring it into the board. Full details are in the
-[firmware README](../firmware/lisanet_wifi/README.md#first-flash); the short version:
+Do this before wiring it into the board. There is nothing to build: the repository holds the finished image. Full
+details are in the [firmware README](../firmware/lisanet_wifi/README.md#first-flash); the short version:
 
 ```bash
-arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-arduino-cli core update-index
-arduino-cli core install esp32:esp32@3.3.12
-arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 --output-dir firmware/lisanet_wifi/build firmware/lisanet_wifi
+pip install esptool
 ```
 
-Then plug the XIAO into the computer by USB-C, put it in download mode (**hold B, tap R, release B**), and upload with
-your port in place of `COM7` (Mac: `/dev/cu.usbmodem...`, Linux: `/dev/ttyACM0`):
+Plug the XIAO into the computer by USB-C and put it in download mode (**hold B, tap R, release B**). Then, straight
+away, with your port in place of `COM7` (Mac: `/dev/cu.usbmodem...`, Linux: `/dev/ttyACM0`):
 
 ```bash
-arduino-cli upload --fqbn esp32:esp32:XIAO_ESP32S3 -p COM7 --input-dir firmware/lisanet_wifi/build firmware/lisanet_wifi
+esptool --chip esp32s3 -p COM7 --after no-reset erase-flash
+esptool --chip esp32s3 -p COM7 --before no-reset write-flash 0x0 firmware/lisanet_wifi/release/lisanet_wifi_factory.bin
 ```
 
-Press **R once** afterwards. Keep the board's default Tools options (the 8 MB partition table is needed for updates over WiFi).
+Press **R once** afterwards. Keep the board's default Tools options if you ever build it yourself (the 8 MB partition
+table is needed for updates over WiFi).
 
 **You should see:** open the XIAO's USB serial port at 115200 baud **with DTR on**; it prints
 `[lisanet] LisaNet WiFi board <version>`. Typing `AT+HELP` lists the commands.

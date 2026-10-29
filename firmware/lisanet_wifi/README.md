@@ -76,54 +76,50 @@ slipping onto it can short the computer's USB port (it trips the port's protecti
 
 ## First flash
 
-This is done once, over USB. After it, updates go over WiFi (see below).
+This is done once, over USB. After it, updates go over WiFi (see below). You do not need to build anything: the
+repository holds a ready-made image, `firmware/lisanet_wifi/release/lisanet_wifi_factory.bin`.
 
-### 1. Install the tools
+### 1. Install esptool
 
-Either [arduino-cli](https://arduino.github.io/arduino-cli/) or the Arduino IDE 2 works. The firmware is built with the
-ESP32 Arduino core **3.3.12**.
+```bash
+pip install esptool
+```
+
+(or `brew install esptool` on a Mac).
+
+### 2. Put the XIAO in download mode and flash
+
+1. Plug the XIAO into the computer by USB-C (with J21 pin 8 unconnected, see Power).
+2. A new XIAO runs Seeed's demo firmware, which cannot be uploaded to automatically: **hold the B (BOOT) button, tap
+   R (RESET), release B.** A new port appears: `COMn` on Windows, `/dev/cu.usbmodem...` on a Mac, `/dev/ttyACM0` on Linux.
+3. Erase and flash (use your port in place of `COM7`), running both commands straight away, because a reset leaves
+   download mode:
+
+   ```bash
+   esptool --chip esp32s3 -p COM7 --after no-reset erase-flash
+   esptool --chip esp32s3 -p COM7 --before no-reset write-flash 0x0 firmware/lisanet_wifi/release/lisanet_wifi_factory.bin
+   ```
+
+4. **Press R once** by itself. After a manual download mode the chip can otherwise keep restarting into the loader
+   ("waiting for download").
+
+### Building it yourself (developers)
+
+Only needed if you change the firmware. Use [arduino-cli](https://arduino.github.io/arduino-cli/) or the Arduino IDE 2
+with the ESP32 Arduino core **3.3.12**:
 
 ```bash
 arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-```
-
-```bash
 arduino-cli core update-index
-```
-
-```bash
 arduino-cli core install esp32:esp32@3.3.12
-```
-
-No extra libraries are needed. (On the LisaFPGA development machine arduino-cli lives at
-`tools/toolchain/arduino-cli/arduino-cli.exe`.)
-
-### 2. Build
-
-From the top of this repository:
-
-```bash
 arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 --output-dir firmware/lisanet_wifi/build firmware/lisanet_wifi
 ```
 
 Keep the board's default options (they include the 8 MB partition table with the two firmware slots that WiFi updates
-need). In the Arduino IDE: open `lisanet_wifi.ino`, choose **XIAO_ESP32S3**, leave the Tools menu as it is.
-
-### 3. Put the XIAO in download mode and upload
-
-1. Plug the XIAO into the computer by USB-C (with J21 pin 8 unconnected, see Power). Note its port: `COMn` on
-   Windows, `/dev/cu.usbmodem...` on a Mac, `/dev/ttyACM0` on Linux.
-2. A new XIAO runs Seeed's demo firmware, which cannot be uploaded to automatically: **hold the B (BOOT) button, tap
-   R (RESET), release B.** The port may change number now.
-3. Upload:
-
-   ```bash
-   arduino-cli upload --fqbn esp32:esp32:XIAO_ESP32S3 -p COM7 --input-dir firmware/lisanet_wifi/build firmware/lisanet_wifi
-   ```
-
-   (use your port in place of `COM7`).
-4. **Press R once** by itself. After a manual download mode the chip can otherwise keep restarting into the loader
-   ("waiting for download"). From now on uploads reset it automatically.
+need). To upload a build directly, use `arduino-cli upload --fqbn esp32:esp32:XIAO_ESP32S3 -p COM7 --input-dir
+firmware/lisanet_wifi/build firmware/lisanet_wifi`. Every time the version changes, refresh `release/`:
+`lisanet_wifi.ino.bin` is the build's app image, and `lisanet_wifi_factory.bin` is the build's `.merged.bin` with the
+trailing empty padding removed (it ends at the first 4 KB boundary after the app).
 
 ### 4. Check that it runs
 
