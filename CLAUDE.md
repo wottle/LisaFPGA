@@ -347,6 +347,11 @@ WiFi only from now on -- do NOT flash it over USB (COM7) unless WiFi updating it
 4. Copy it to a fresh, versioned file for the user: `firmware/lisanet_wifi/build/releases/lisanet_wifi-<version>.ino.bin`
    (build/ is git-ignored; the plain `lisanet_wifi.ino.bin` is overwritten by every compile, so the versioned copy is
    the one to hand over). Give the user its full Windows path. NEVER hand over `.merged.bin` (refused: too big).
+   **When the version is committed, also refresh the COMMITTED prebuilt images in `firmware/lisanet_wifi/release/`**
+   (added 2026-10-29 so a first flash needs no build): `lisanet_wifi.ino.bin` = the build's app image, and
+   `lisanet_wifi_factory.bin` = the build's `.merged.bin` cut at the first 4 KB boundary after the app, i.e.
+   `head -c $(( ((65536 + appsize + 4095) / 4096) * 4096 ))`; check that the bytes cut off are all 0xFF and that both
+   files carry the new tag.
 5. The user installs it from lisanet.local -> Settings -> "WiFi board firmware" -> Install update. The new version
    is on trial for 20 s; ask the user what the card shows afterwards before recording a result.
 6. Commit the source with the version bump (only when the user asks).
