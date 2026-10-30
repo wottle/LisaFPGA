@@ -22,11 +22,11 @@
 #pragma once
 
 #ifndef LISANET_WIFI_VERSION         // a test build can override it with -D
-#define LISANET_WIFI_VERSION "0.17"
+#define LISANET_WIFI_VERSION "0.18"
 #endif
 // What this version brought, shown next to the version on the web page. Rewrite it with every new version.
 #ifndef LISANET_WIFI_NOTES
-#define LISANET_WIFI_NOTES   "the Insert a disk list is read in the background and kept"
+#define LISANET_WIFI_NOTES   "AI chat waits up to 60 s (settable); was cut off at 4.5 s"
 #endif
 
 #define LISA_RX_PIN   1        // D0

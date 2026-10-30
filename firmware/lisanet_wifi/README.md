@@ -202,6 +202,11 @@ names (Claude defaults to `claude-sonnet-5-5`; the OpenAI default `gpt-4o-mini` 
 account has), and press *Save chat settings*. These are kept at once. *Try it* asks one question outside the Lisa's
 conversation, which is the quickest way to check a key and model.
 
+*Reply timeout* (default 60 s, 10 to 65 s) is how long the board waits for the AI service's answer. A hard question with a
+long *Reply length* can take a while; if one comes back as `[error: no answer within N s ...]`, raise the timeout or
+lower the reply length. 65 s is the most the ESP32's HTTP client can wait (before 0.18 the board meant to wait 70 s but
+actually gave up after about 4.5 s). The Lisa program must also be willing to wait that long for its answer.
+
 **What a Lisa program does** (N: unit, any of N1-N8):
 
 | Step | FujiNet call | Notes |

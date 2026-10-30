@@ -11,7 +11,11 @@ upstream untouched. ESFloppy fork `main` = `bc71bad`, ESProFile fork `main` = `8
 - FPGA: the FujiNet build (control version 3) -- `fpga_fujinet_2026-10-22.{bit,mcs}` in `tools/esp32_wifi_test/backup/`,
   and now also the COMMITTED `LisaFPGA.runs/impl_1/top.{bit,mcs}` (commit `9a3119d`). WNS +0.589 / WHS +0.048.
 - ESFloppy: LisaNet firmware (OLED guard + floppy remote), `bc71bad`. ESProFile: LisaNet firmware, `81f33f3`.
-- XIAO: **0.17 installed and working** (user, 2026-10-26), matching the source. 0.17: `drivecache.cpp` reads the
+- XIAO: **0.18 installed and working** (user, 2026-10-30), matching the source. 0.18: the AI chat's reply timeout
+  was really ~4.5 s -- `HTTPClient::setTimeout()` takes a **uint16_t** of ms, so the old 70000 wrapped to 4464; now a
+  web setting *Reply timeout* (NVS "tmo", default 60, 10-65 s, 65535 ms being the ceiling) and a clear
+  `[error: no answer within N s ...]` message. Long answers confirmed working. **Any `setTimeout` on this core's
+  HTTPClient must stay <= 65535 ms** (fujinet.cpp uses 10000, fine). 0.17: `drivecache.cpp` reads the
   floppy images ESFloppy's drive accepts in the background (Normal mode only, one folder per step, only after 3 s with
   no FujiNet traffic, growing backoff when ESFloppy does not answer) and keeps them; `/api/drive/images` (GET; POST =
   Rescan) feeds the Insert a disk dialog instantly. Dropped when the drives leave Normal (re-read ~12 s after returning)
