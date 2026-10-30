@@ -15,7 +15,11 @@ namespace chat {
 static const int CLAUDE = 1, OPENAI = 2;
 static const size_t MAX_RESPONSE = 48 * 1024;     // the most of a reply's JSON we will hold (no PSRAM in this build)
 static const size_t HISTORY_BYTES = 6000;
-static const uint32_t HTTP_TIMEOUT_MS = 70000;    // per read; a model may think for a while before the first byte
+// How long to wait for the API's answer (per read: the model may think for a while before the first byte). The core's
+// HTTPClient keeps this in a uint16_t of milliseconds, so it CANNOT exceed 65535 ms: the old 70000 wrapped round to
+// 4464 ms and cut off every answer that took longer than ~4.5 s. Settable on the AI chat card, 10-65 s.
+static const int TIMEOUT_MIN_S = 10, TIMEOUT_MAX_S = 65, TIMEOUT_DEFAULT_S = 60;
+static int timeoutSec = TIMEOUT_DEFAULT_S;
 
 static Preferences nvs;
 static String keyClaude, keyOpenai, modelClaude, modelOpenai, systemPrompt, defaultProvider;
@@ -36,6 +40,7 @@ static String lastNote;                           // the last request's outcome,
 struct Job {                                      // handed to the task; the task writes ok and text, then st = FINISHED
     int provider = 0;
     bool remember = false, verify = true;
+    int timeoutSec = TIMEOUT_DEFAULT_S;
     std::string url, body;
     String key, model;
     bool ok = false;
@@ -54,6 +59,7 @@ void begin() {
     systemPrompt = nvs.getString("sys", DEFAULT_SYSTEM);
     maxTokens = nvs.getInt("maxtok", 600);
     historyTurns = nvs.getInt("turns", 12);
+    timeoutSec = constrain(nvs.getInt("tmo", TIMEOUT_DEFAULT_S), TIMEOUT_MIN_S, TIMEOUT_MAX_S);
     verifyTls = nvs.getBool("verify", true);
     enabledFlag = nvs.getBool("enabled", false);
 }
@@ -127,7 +133,7 @@ static void chatTask(void *) {
     if (j.verify) client.setCACert(CHAT_ROOTS);
     else client.setInsecure();
     HTTPClient http;
-    http.setTimeout(HTTP_TIMEOUT_MS);
+    http.setTimeout((uint16_t)(j.timeoutSec * 1000));   // <= 65000: see TIMEOUT_MAX_S
     http.setReuse(false);
     String err;
     if (j.verify && time(nullptr) < 1700000000) err = "the board's clock is not set yet (no NTP answer), so certificates cannot be checked; try again in a minute";
@@ -144,7 +150,12 @@ static void chatTask(void *) {
         if (code <= 0) {
             char why[100] = "";
             client.lastError(why, sizeof why);
-            err = String("no connection (") + http.errorToString(code) + (why[0] ? String(": ") + why : String("")) + ")";
+            if (strncmp(why, "UNKNOWN ERROR CODE", 18) == 0) why[0] = 0;   // mbedTLS's text for "no TLS error"
+            if (code == HTTPC_ERROR_READ_TIMEOUT)
+                err = String("no answer within ") + j.timeoutSec + " s (raise Reply timeout on the web page, up to 65 s, "
+                      "or lower Reply length)";
+            else
+                err = String("no connection (") + http.errorToString(code) + (why[0] ? String(": ") + why : String("")) + ")";
             if (j.verify && why[0]) err += "; if a certificate problem, turn off Verify certificates on the web page";
         }
         else if (http.getSize() > (int)MAX_RESPONSE) err = "the reply was too large";
@@ -196,6 +207,7 @@ bool start(int kind, const std::string &prompt, bool remember) {
     job.provider = provider;
     job.remember = remember;
     job.verify = verifyTls;
+    job.timeoutSec = timeoutSec;
     job.key = key;
     job.model = model;
     job.url = provider == CLAUDE ? "https://api.anthropic.com/v1/messages" : "https://api.openai.com/v1/chat/completions";
@@ -247,6 +259,7 @@ String infoJson() {
     String o = String("{\"enabled\":") + (enabledFlag ? "true" : "false") + ",\"provider\":\"" + defaultProvider + "\",\"claudeKey\":" + (keyClaude.length() ? "true" : "false") +
                ",\"openaiKey\":" + (keyOpenai.length() ? "true" : "false") + ",\"claudeModel\":\"" + jesc(modelClaude) +
                "\",\"openaiModel\":\"" + jesc(modelOpenai) + "\",\"maxTokens\":" + maxTokens + ",\"turns\":" + historyTurns +
+               ",\"timeout\":" + timeoutSec +
                ",\"system\":\"" + jesc(systemPrompt) + "\",\"verify\":" + (verifyTls ? "true" : "false") + ",\"state\":\"" +
                (state() == IDLE ? "idle" : state() == RUNNING ? "running" : "reply") + "\",\"claudeTurns\":" +
                (unsigned)hist[CLAUDE].size() + ",\"openaiTurns\":" + (unsigned)hist[OPENAI].size() + ",\"last\":\"" +
@@ -276,6 +289,10 @@ bool setConfig(const String &name, const String &raw, String &err) {
         long n = v.toInt();
         if (n < 2 || n > 40) { err = "history is 2 to 40 turns"; return false; }
         historyTurns = n; nvs.putInt("turns", historyTurns);
+    } else if (name == "timeout") {
+        long n = v.toInt();
+        if (n < TIMEOUT_MIN_S || n > TIMEOUT_MAX_S) { err = "the reply timeout is 10 to 65 seconds"; return false; }
+        timeoutSec = n; nvs.putInt("tmo", timeoutSec);
     } else if (name == "enabled") {
         enabledFlag = v == "1" || v == "true"; nvs.putBool("enabled", enabledFlag);
         if (!enabledFlag) resetHistory();
