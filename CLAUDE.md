@@ -12,7 +12,7 @@ that `mine/main` has no commits the branch lacks; force pushes are blocked here.
 **On the board:**
 - FPGA: the TV MENU build (control version 4, below) = the COMMITTED `LisaFPGA.runs/impl_1/top.{bit,mcs}` (copy
   `tools/esp32_wifi_test/backup/fpga_tvmenu_2026-11-03.{bit,mcs}`), JTAG-tested and working (user, 2026-11-03);
-  FLASHED 2026-11-03 (3 MHz, use_file; erase/program/verify OK; cold-boot check by the user pending). WNS +0.165 / WHS +0.036.
+  FLASHED 2026-11-03 (3 MHz, use_file; erase/program/verify OK; cold boot PASSED 2026-11-03: settings and a saved TV MENU OFF persist). WNS +0.165 / WHS +0.036.
 - ESFloppy: LisaNet firmware with the scrolling 9-row OLED menu copy (floppy remote 0.3), flashed 2026-11-03.
   ESProFile: `81f33f3`.
 - XIAO: source and `release/` images are **0.19** ("Menu on the TV" checkbox, shown only with control version 4);
