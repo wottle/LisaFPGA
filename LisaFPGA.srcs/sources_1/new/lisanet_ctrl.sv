@@ -331,3 +331,146 @@ module lisanet_ctrl (
     end
 
 endmodule
+
+// ---------------------------------------------------------------------------------------------
+// osd_mirror -- sends the on-screen menu's state to ESFloppy, which draws a copy of the menu on its OLED. Written with an
+// AI assistant. See docs/lisanet_link_protocol.md, "Menu mirror frames".
+//
+// ESFloppy's link input (ESFLOPPY_COMM_BUS[4]) normally carries the WiFi board's TX. While this module sends, top.sv
+// switches that line to it instead, for one frame in the control-frame format:
+//
+//   C3 3C 96 69 | 0x90 | 0x00 | 14 | HDMI_Interface's status bytes 0-13 | CRC-32 (zlib, over 0x90..payload, LE)
+//
+// Byte 13 carries the menu itself (open, adjust mode, axis, step, the highlighted item). Frames go out while the menu or
+// adjust mode is up: at once on any change (at most one every ~8 ms) and every ~270 ms regardless, then three more after
+// it closes, so a frame lost to a collision only delays the picture; ESFloppy also drops its copy if frames stop coming.
+// A frame starts only once the WiFi board's TX has been idle for GUARD clocks (or there is no board), so it never cuts
+// into a request already on the wire; a request that starts mid-frame is damaged and the WiFi board's retry recovers it.
+// The SD servers and ESFloppy's floppy remote look for A5 5A and skip everything else, as they do for control frames.
+// ---------------------------------------------------------------------------------------------
+module osd_mirror (
+    input  logic         clk,          // sysclk_fabric, 125 MHz
+    input  logic         enable,       // sysclk domain: off while ESFloppy is the SD server (no OLED there)
+    input  logic         xiao_tx_pin,  // J21 GPIO5, the WiFi board's TX (asynchronous)
+    input  logic [111:0] status_in,    // from HDMI_Interface, clk_pixel domain; sampled twice and compared
+    output logic         tx,
+    output logic         tx_en = 1'b0
+);
+    localparam int GUARD     = 2500;          // 20 us of idle on the WiFi board's TX first
+    localparam int PREAMBLE  = 250;           // 4 bit times of idle (mark) on the line before the first start bit
+    localparam int MIN_GAP   = 1 << 20;       // ~8.4 ms between frames
+    localparam int HEARTBEAT = 1 << 25;       // ~268 ms
+
+    (* ASYNC_REG = "TRUE" *) logic x_int = 1'b1, x_s = 1'b1;
+    always_ff @(posedge clk) begin x_int <= xiao_tx_pin; x_s <= x_int; end
+
+    // ---- 2 Mbaud UART transmitter, as in lisanet_ctrl ------------------------------------------------------------
+    logic        tx_start = 1'b0;
+    logic [7:0]  tx_data = 8'd0;
+    logic        tx_busy = 1'b0;
+    logic [9:0]  tshift = 10'h3FF;
+    logic [3:0]  tbit = 4'd0;
+    logic [6:0]  tcnt = 7'd0;
+    logic        ttog = 1'b0;
+    logic        tx_line = 1'b1;
+    assign tx = tx_line;
+    always_ff @(posedge clk) begin
+        if (!tx_busy) begin
+            tx_line <= 1'b1;
+            if (tx_start) begin
+                tshift  <= {1'b1, tx_data, 1'b0};
+                tx_line <= 1'b0;
+                tx_busy <= 1'b1;
+                tbit <= 4'd0; ttog <= 1'b0; tcnt <= 7'd61;
+            end
+        end else if (tcnt != 7'd0) begin
+            tcnt <= tcnt - 1'b1;
+        end else begin
+            ttog <= ~ttog;
+            tcnt <= ttog ? 7'd61 : 7'd62;
+            if (tbit == 4'd9) begin tx_busy <= 1'b0; tx_line <= 1'b1; end
+            else begin tbit <= tbit + 1'b1; tx_line <= tshift[tbit + 1'b1]; end
+        end
+    end
+
+    // ---- A stable copy of the status block -----------------------------------------------------------------------
+    logic [111:0] status_q = 112'd0, snap = 112'd0, cur = 112'd0, sent = 112'd0;
+    logic [5:0]   snap_wait = 6'd0;
+    always_ff @(posedge clk) begin
+        status_q <= status_in;       // bounded by the clock-level set_max_delay; compared twice before use
+        if (snap_wait == 6'd0) begin snap <= status_q; snap_wait <= 6'd1; end
+        else if (snap_wait != 6'd63) snap_wait <= snap_wait + 1'b1;
+        else begin
+            if (status_q == snap) cur <= snap;                       // unchanged 63 clocks later: take it
+            snap_wait <= 6'd0;
+        end
+    end
+    logic active, board_present;
+    assign active        = cur[111] | cur[110];                      // the menu is open, or adjust mode
+    assign board_present = cur[10];                                  // status byte 1 bit 2
+
+    // ---- Frames ----------------------------------------------------------------------------------------------------
+    typedef enum logic [2:0] {M_IDLE, M_CRC, M_GUARD, M_PRE, M_SEND, M_WAIT, M_DONE} mstate_t;
+    mstate_t     ms = M_IDLE;
+    logic [7:0]  fbuf [0:24];                // C3 3C 96 69, 90, 00, 0E, 14 bytes, CRC-32
+    logic [4:0]  fidx = 5'd0;
+    logic [31:0] crc = 32'hFFFFFFFF;
+    logic [7:0]  cbyte = 8'd0;
+    logic [3:0]  cbits = 4'd0;
+    logic [25:0] since = 26'd0;              // clocks since the last frame started
+    logic [1:0]  linger = 2'd0;              // frames still to send after the menu closed
+    logic        was_active = 1'b0;
+    logic [11:0] guard = 12'd0;
+
+    always_ff @(posedge clk) begin
+        tx_start <= 1'b0;
+        if (since != 26'h3FFFFFF) since <= since + 1'b1;
+
+        if (cbits != 4'd0) begin
+            crc   <= {1'b0, crc[31:1]} ^ ((crc[0] ^ cbyte[0]) ? 32'hEDB88320 : 32'd0);
+            cbyte <= {1'b0, cbyte[7:1]};
+            cbits <= cbits - 1'b1;
+        end
+
+        case (ms)
+            M_IDLE: begin
+                    was_active <= active;
+                    if (was_active && !active) linger <= 2'd3;
+                    else if (enable && (active || linger != 2'd0) && since >= MIN_GAP[25:0] &&
+                             (cur != sent || since >= HEARTBEAT[25:0])) begin
+                        if (!active) linger <= linger - 1'b1;
+                        sent <= cur;
+                        fbuf[0] <= 8'hC3; fbuf[1] <= 8'h3C; fbuf[2] <= 8'h96; fbuf[3] <= 8'h69;
+                        fbuf[4] <= 8'h90; fbuf[5] <= 8'h00; fbuf[6] <= 8'd14;
+                        for (int i = 0; i < 14; i++) fbuf[7 + i] <= cur[8*i +: 8];
+                        fidx  <= 5'd4;
+                        crc   <= 32'hFFFFFFFF;
+                        since <= 26'd0;
+                        ms <= M_CRC;
+                    end
+                end
+            M_CRC: if (cbits == 4'd0) begin                                 // CRC over 90 .. payload
+                       if (fidx == 5'd21) begin
+                           {fbuf[24], fbuf[23], fbuf[22], fbuf[21]} <= crc ^ 32'hFFFFFFFF;
+                           guard <= 12'd0;
+                           ms <= M_GUARD;
+                       end else begin
+                           cbyte <= fbuf[fidx]; cbits <= 4'd8; fidx <= fidx + 1'b1;
+                       end
+                   end
+            M_GUARD: if (!enable) ms <= M_IDLE;
+                     else if (board_present && !x_s) guard <= 12'd0;         // the WiFi board is talking: wait
+                     else if (guard == GUARD[11:0]) begin tx_en <= 1'b1; guard <= 12'd0; ms <= M_PRE; end
+                     else guard <= guard + 1'b1;
+            M_PRE: if (guard == PREAMBLE[11:0]) begin fidx <= 5'd0; ms <= M_SEND; end
+                   else guard <= guard + 1'b1;
+            M_SEND: if (!tx_busy && !tx_start) begin
+                        if (fidx == 5'd25) ms <= M_DONE;
+                        else begin tx_data <= fbuf[fidx]; tx_start <= 1'b1; fidx <= fidx + 1'b1; ms <= M_WAIT; end
+                    end
+            M_WAIT: if (tx_busy) ms <= M_SEND;
+            M_DONE: if (!tx_busy) begin tx_en <= 1'b0; ms <= M_IDLE; end    // the last stop bit is out
+            default: ms <= M_IDLE;
+        endcase
+    end
+endmodule

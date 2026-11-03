@@ -1,16 +1,20 @@
 # LisaFPGA — Project Notes for Claude
 
-## Current state (2026-10-25) -- read this first
+## Current state (2026-11-03) -- read this first
 
-**Git:** `fork/main` = `feature/lisanet-control` = `0720258` plus the commit adding this status (pushed to `mine` =
-github.com/wottle/LisaFPGA). Alex's
-upstream untouched. ESFloppy fork `main` = `bc71bad`, ESProFile fork `main` = `81f33f3` (both pushed, unchanged since
-2026-10-16).
+**Git:** `fork/main` = `feature/lisanet-control` = the OLED menu-copy commit (2026-11-03) (pushed to `mine` =
+github.com/wottle/LisaFPGA), working tree clean apart from untracked Vivado run files. Alex's upstream untouched.
+History note: `abaa663` (prebuilt XIAO images, another session) landed on `main` while 0.18 was in progress; 0.18 was
+rebased onto it (`a6c1e87`), the images refreshed (`0f60626`), and the pre-rebase copy `c28898f` merged in (`d839347`)
+rather than force-pushed -- so 0.18 appears twice in the log with identical content. **Before pushing, fetch and check
+that `mine/main` has no commits the branch lacks; force pushes are blocked here.** ESFloppy fork `main` = `lisanet` = `88f8931`, ESProFile fork `main` = `81f33f3`.
 
-**On the board (all in flash, cold-booted):**
-- FPGA: the FujiNet build (control version 3) -- `fpga_fujinet_2026-10-22.{bit,mcs}` in `tools/esp32_wifi_test/backup/`,
-  and now also the COMMITTED `LisaFPGA.runs/impl_1/top.{bit,mcs}` (commit `9a3119d`). WNS +0.589 / WHS +0.048.
-- ESFloppy: LisaNet firmware (OLED guard + floppy remote), `bc71bad`. ESProFile: LisaNet firmware, `81f33f3`.
+**On the board:**
+- FPGA: in FLASH still the FujiNet build (control version 3, `fpga_fujinet_2026-10-22.{bit,mcs}`). The OLED
+  menu-copy build (below) is JTAG-tested and WORKS (user, 2026-11-03) but is NOT yet flashed; its `top.{bit,mcs}` are
+  the COMMITTED `LisaFPGA.runs/impl_1` ones (copy `tools/esp32_wifi_test/backup/fpga_osdmirror_2026-11-02.{bit,mcs}`),
+  so `program_board.sh` users get it. Flash it (Lisa off, user's go-ahead) to match.
+- ESFloppy: LisaNet firmware with the OLED menu copy (floppy remote 0.2), flashed 2026-11-02. ESProFile: `81f33f3`.
 - XIAO: **0.18 installed and working** (user, 2026-10-30), matching the source. 0.18: the AI chat's reply timeout
   was really ~4.5 s -- `HTTPClient::setTimeout()` takes a **uint16_t** of ms, so the old 70000 wrapped to 4464; now a
   web setting *Reply timeout* (NVS "tmo", default 60, 10-65 s, 65535 ms being the ceiling) and a clear
@@ -29,6 +33,29 @@ upstream untouched. ESFloppy fork `main` = `bc71bad`, ESProFile fork `main` = `8
   ESP32S3 & Wio-SX1262 Meshtastic LoRa Dev Kit* (Amazon a.co/d/00z6Lj4b): only the XIAO is used, with the kit's 2.4 GHz
   antenna (the LARGER of its two, shipped on the XIAO; the small rectangular one is the LoRa board's); it ships pre-flashed with Meshtastic (hence the manual B+R download mode on the first flash). Noted in
   `firmware/lisanet_wifi/README.md`'s parts list.
+
+**Done 2026-11-02 .. 11-03: the on-screen menu on ESFloppy's OLED (replacement OLED fitted, works).** Hardware-tested
+on a JTAG load: splash, menu, highlight, settings, adjust readout, ESFloppy ignoring the buttons, its screen returning.
+- FPGA (WNS +0.568 / WHS +0.058, 9 pulse-width entries, 22875 LUTs): `HDMI_Interface` outputs `esf_btn_block` (summon
+  chord held, menu open or adjusting, and until all buttons are released) which top.sv ORs into ESFLOPPY_COMM_BUS[0..2]
+  (active low = released), and `ctrl_status` grew to 14 bytes: byte 13 = {menu open, adjusting, axis_y, coarse, 0,
+  menu_sel[2:0]} (lisanet_ctrl still sends only bytes 0-12). `osd_mirror` (in lisanet_ctrl.sv, sysclk) sends cmd 0x90
+  frames (control-frame format, payload = status bytes 0-13) on ESFLOPPY_COMM_BUS[4] on each change and every ~268 ms
+  while the menu is up, plus 3 after it closes, only after 20 us of XIAO TX idle (no guard without a board); off in
+  serve_fdd (ESFloppy is then the SD server, no OLED). The link input now idles HIGH with no board and in WIFI HDD.
+  Its pixel -> sysclk snapshot is covered by the clock-level set_max_delay (verified by effect, slack 18.8 ns).
+  Protocol doc: `docs/lisanet_link_protocol.md`, "Menu mirror frames".
+- ESFloppy (`lisanet` branch): `lisanetMenu.cpp` parses the frames (fed every link byte from `lisanetDrive.cpp`) and
+  draws the gear splash (1 s, or until a press), the menu (values worded as on the TV), or the adjust readout;
+  `ui.cpp` skips its own buttons/screen while the copy is showing (dropped after 800 ms without frames).
+
+**Done 2026-10-26 .. 11-02:** XIAO 0.16 (Lisa programs set the FujiNet speed), 0.17 (Insert a disk list cached),
+0.18 (AI chat timeout fix), each installed over WiFi by the user and confirmed before committing. **Prebuilt XIAO
+images** now live in `firmware/lisanet_wifi/release/` (`abaa663`): `lisanet_wifi.ino.bin` (for Install update) and
+`lisanet_wifi_factory.bin` (first flash with esptool at 0x0, no build needed; `docs/lisanet_setup.md` step 2 uses it).
+The factory image is the compile's `.merged.bin` cut to the first 4 KB boundary after the app:
+`head -c $(( ((65536 + appsize + 4095)/4096)*4096 ))`. **Refresh both files with every committed XIAO version**
+(they were left at 0.17 for a moment); check the tag is in both and only 0xFF padding was cut.
 
 **Done 2026-10-25:**
 - Committed the production bitstream (the repo had been shipping the 10-07 build to `program_board.sh` users).

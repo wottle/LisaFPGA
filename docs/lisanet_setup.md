@@ -37,11 +37,13 @@ Everything LisaNet needs comes from this one run:
 
 - **ESFloppy and ESProFile** are built from this fork's own firmware, the `main` branches of
   [wottle/ESFloppy](https://github.com/wottle/ESFloppy) and [wottle/ESProFile](https://github.com/wottle/ESProFile):
-  Alex's firmware plus the SD card server the Files tab uses, ESFloppy's floppy remote and its dead-OLED guard. If an
+  Alex's firmware plus the SD card server the Files tab uses, ESFloppy's floppy remote, its copy of the on-screen menu
+  on the OLED and its dead-OLED guard. If an
   earlier run of the script left clones of Alex's repositories in the checkout, it switches them over to these.
 
 **You should see:** the board boots to the Lisa display as usual. Hold LEFT + RIGHT for about 3 seconds and the
-on-screen menu appears. There is no ESP32 MODE row yet; it appears once the XIAO is connected.
+on-screen menu appears, and ESFloppy's OLED shows a gear splash and then the same menu. There is no ESP32 MODE row
+yet; it appears once the XIAO is connected.
 
 ## 2. Flash the XIAO ESP32-S3 (once, over USB)
 

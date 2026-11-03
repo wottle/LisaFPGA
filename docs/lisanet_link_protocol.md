@@ -142,3 +142,24 @@ Version 2: 11 bit 0 scanlines, 1 SCANLINES jumper, 2 inverse video, 3 INVERSE VI
 in byte 2), 5 CPU ROM switch at 3A, 6 Twiggy I/O ROM, 7 I/O ROM switch at Twiggy; 12 bits 0-1 RAM size (0-3 =
 512K-2M), 2-3 the RAM SIZE jumpers, 4 RAM size set from the web; version 3: 12 bit 5 Serial B to the WiFi board, 6 the Serial B
 bench test. Effective values include the web's overrides.
+
+## Menu mirror frames (FPGA -> ESFloppy)
+
+ESFloppy draws a copy of the on-screen menu on its OLED (ESFloppy `lisanetMenu.cpp`; FPGA `osd_mirror` in
+`lisanet_ctrl.sv`, builds from 2026-11-02). While the menu or its picture-adjust mode is up, the FPGA:
+
+- holds ESFloppy's copies of LEFT, OK and RIGHT (`ESFLOPPY_COMM_BUS[2:0]`) released, from the moment LEFT+RIGHT are
+  held together until every button is let go after the menu closes, so menu presses never act on ESFloppy's screens;
+- sends frames on ESFloppy's link input (`ESFLOPPY_COMM_BUS[4]`) in the control-frame format above, one-way:
+  `C3 3C 96 69 | 0x90 | 0x00 | 14 | status bytes 0-13 | CRC-32`. Status bytes 0-12 are as above; byte 13 is the menu:
+  bits 0-2 the highlighted item (0 ESP32 MODE, 1 RESOLUTION, 2 ADJUST HORIZ, 3 ADJUST VERT, 4 CPU SPEED,
+  5 MAX CONTRAST, 6 SAVE SETTINGS, 7 EXIT), 4 coarse step, 5 adjusting V (else H), 6 adjust mode, 7 the menu is open.
+
+Frames go out at once on a change (at most one per ~8 ms), every ~270 ms while the menu is up, and three times after it
+closes; ESFloppy drops its copy if none arrives for 800 ms. A frame starts only after the WiFi board's TX has been idle
+20 us (or with no board on J21), so it never cuts into a request already on the wire; a request that starts during the
+~130 us frame is damaged and recovered by the WiFi board's retry. Nothing is sent while ESFloppy is the SD server (WIFI
+FDD), which has no screen. Byte 13 is not part of the WiFi board's STATUS reply.
+
+Since these builds ESFloppy's link input idles high (mark) with no WiFi board and in WIFI HDD, instead of low, so its
+drive firmware brings the link up and hears the frames; that firmware only ever answers requests, so it stays silent.

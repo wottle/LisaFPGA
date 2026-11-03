@@ -6,7 +6,7 @@ The Apple Lisa computer implemented inside an FPGA!
 # About This Fork (Lisa Mini)
 This is the [wottle/LisaFPGA](https://github.com/wottle/LisaFPGA) fork of Alex's LisaFPGA, built for the [Lisa Mini case](https://github.com/wottle/lisa-mini). On top of upstream it adds:
 - Image offset/alignment tuning and resolution modes, so the picture lands correctly in the case's screen opening.
-- An on-screen menu summoned by holding LEFT+RIGHT for about 3 seconds.
+- An on-screen menu summoned by holding LEFT+RIGHT for about 3 seconds. ESFloppy's OLED shows a copy of it (a short splash, then the menu or the image-position readout), so you can read and change the settings there even when the monitor shows no picture. While the menu is up the buttons drive only the menu; ESFloppy ignores them and its own screen returns when the menu closes.
 - CPU speed selectable from the on-screen menu, overriding the SPEED SELECT switches and saved across power cycles.
 - A USB soft-CPU host with hub support, so keyboards and mice work through a USB hub.
 - Settings persistence in the configuration flash.
@@ -24,7 +24,7 @@ Before running the script:
 - Plug the board into your computer's USB port with a data-capable USB-C cable, and make sure the board's power switch is on.
 - Your computer may prompt you to allow the board's USB hub to connect. If it does, approve it. You may then need to unplug and reconnect the board before running the script.
 
-The script flashes whatever bitstream is in your checkout, so running it from this fork installs the fork's version. The ESProFile and ESFloppy ESP32 firmware comes from this fork's own copies, [wottle/ESProFile](https://github.com/wottle/ESProFile) and [wottle/ESFloppy](https://github.com/wottle/ESFloppy): Alex's firmware plus the LisaNet pieces (an SD card server for the WiFi board, ESFloppy's floppy remote and a guard against a dead OLED), which behave like Alex's when there is no WiFi board. See [Programming/Updating the Firmware](#programmingupdating-the-firmware) for details.
+The script flashes whatever bitstream is in your checkout, so running it from this fork installs the fork's version. The ESProFile and ESFloppy ESP32 firmware comes from this fork's own copies, [wottle/ESProFile](https://github.com/wottle/ESProFile) and [wottle/ESFloppy](https://github.com/wottle/ESFloppy): Alex's firmware plus the LisaNet pieces (an SD card server for the WiFi board, ESFloppy's floppy remote, its copy of the on-screen menu on the OLED and a guard against a dead OLED), which behave like Alex's when there is no WiFi board. See [Programming/Updating the Firmware](#programmingupdating-the-firmware) for details.
 
 # Start Here
 Here are some links to different parts of this document depending on what you want to do:
@@ -487,7 +487,7 @@ There are quite a lot of switches, jumpers, buttons, and LEDs on the LisaFPGA bo
 | ESFloppy BOOT                  | Button   | Same as ESProFile BOOT, but for ESFloppy. |
 | ESFloppy OLED Display          | OLED     | The 1.3" OLED that displays the user interface for ESFloppy. |
 | ESFloppy Activity LED          | LED      | A green LED right below the OLED to indicate drive activity on ESFloppy. It blinks about twice per second whenever a disk is spinning. |
-| ESFloppy LEFT, SEL, and RIGHT  | Buttons  | The buttons that you use to control the ESFloppy UI on the OLED. |
+| ESFloppy LEFT, SEL, and RIGHT  | Buttons  | The buttons that you use to control the ESFloppy UI on the OLED. In this fork, holding LEFT and RIGHT together for about 3 seconds opens the on-screen menu instead; while it is open the buttons drive the menu, ESFloppy ignores them, and the OLED shows a copy of the menu. |
 | BITMODE                        | Jumper   | Determines whether the FPGA gets its bitstream from SPI flash or JTAG. Unless there's some reason why you want to forbid it from loading the LisaFPGA code from flash at power-on, you'll always want this to be in the SPI position. |
 | PROGRAM                        | Button   | Makes the FPGA reload its bitstream from SPI flash, erasing the Lisa design from its memory and reloading it again. Don't press this while you're using the Lisa unless it's hung or you know what you're doing; you'll lose any unsaved work! |
 | DONE                           | LED      | Lights up whenever the FPGA is done loading its bitstream from flash. Essentially, it's off when the Lisa design hasn't been loaded yet and on once it has been loaded and is ready for use. |

@@ -237,10 +237,14 @@ module top(
     assign INTERNAL_SCC_EN = 1'b0;
 
     // Pass the LEFT, OK, and RIGHT signals from the ESFloppy control buttons straight back out to the ESP32 again
-    // Just pick three of the ESFLOPPY_COMM_BUS lines for this
-    assign ESFLOPPY_COMM_BUS[0] = LEFT_ESFLOPPY;
-    assign ESFLOPPY_COMM_BUS[1] = OK_ESFLOPPY;
-    assign ESFLOPPY_COMM_BUS[2] = RIGHT_ESFLOPPY;
+    // Just pick three of the ESFLOPPY_COMM_BUS lines for this.
+    // While the on-screen menu (or its adjust mode) has the buttons, ESFloppy sees them released (they are active low),
+    // so menu presses never also act on ESFloppy's own screens; esf_btn_block comes from HDMI_Interface. It changes at
+    // human speed and only gates three output pins, so it needs no synchroniser.
+    logic esf_btn_block;
+    assign ESFLOPPY_COMM_BUS[0] = LEFT_ESFLOPPY  | esf_btn_block;
+    assign ESFLOPPY_COMM_BUS[1] = OK_ESFLOPPY    | esf_btn_block;
+    assign ESFLOPPY_COMM_BUS[2] = RIGHT_ESFLOPPY | esf_btn_block;
     // Bits [5:3] are the WiFi-mode link to the ESP32 (MODE, serial TX, serial RX) -- see "ESP32 MODE" below.
 
     logic _SL0;
@@ -806,7 +810,7 @@ module top(
     logic        ctrl_tx, ctrl_tx_en;
     logic [15:0] ctrl_web_req;
     logic        ctrl_web_ack;
-    logic [103:0] ctrl_status;
+    logic [111:0] ctrl_status;      // bytes 0-12 for the WiFi board; byte 13 (the menu itself) only for osd_mirror
     // The web page's overrides of the INVERSE VIDEO jumper, the ROM switches and the RAM SIZE jumpers (HDMI_Interface
     // holds and saves them; see its cfg_ovr port). Toggles are XORed onto the pins, so the switches still work.
     logic [5:0] lnet_cfg_ovr;
@@ -822,7 +826,7 @@ module top(
         .sd_tx_pin(serve_hdd ? ESPROFILE_COMM_BUS[2] : ESFLOPPY_COMM_BUS[5]),   // ESFloppy's idles high (pull-up)
         .tx(ctrl_tx),
         .tx_en(ctrl_tx_en),
-        .status_in(ctrl_status),
+        .status_in(ctrl_status[103:0]),
         .web_req(ctrl_web_req),
         .web_ack(ctrl_web_ack),
         .pwr_press(ctrl_pwr_press),
@@ -841,9 +845,25 @@ module top(
     assign GPIO[5] = 1'bz;
     assign GPIO[1:0] = 2'bzz;                                            // jumper inputs, never driven
 
+    // ESFloppy's OLED copy of the on-screen menu: osd_mirror sends the menu's state on ESFloppy's link input, between
+    // the WiFi board's requests (see lisanet_ctrl.sv). Not while ESFloppy is the SD server, which has no screen.
+    logic mirror_tx, mirror_tx_en;
+    osd_mirror esfloppy_osd_mirror (
+        .clk(sysclk_fabric),
+        .enable(~serve_fdd),
+        .xiao_tx_pin(GPIO[5]),
+        .status_in(ctrl_status),
+        .tx(mirror_tx),
+        .tx_en(mirror_tx_en)
+    );
+
     assign ESFLOPPY_COMM_BUS[3] = serve_fdd;
-    assign ESFLOPPY_COMM_BUS[4] = serve_hdd ? 1'b0 : GPIO[5];            // WiFi board -> ESFloppy (server, or drive in
-                                                                         // NORMAL); 0 with no board (XDC pull-down)
+    // WiFi board -> ESFloppy (server, or drive in NORMAL). With no board, or while ESProFile is the server, the line
+    // idles high (mark) rather than low, so ESFloppy's drive firmware brings its link up and can receive the menu frames.
+    // That firmware only ever transmits answers to requests, so it stays silent there. wifi_present_menu is a clk_pixel
+    // level that changes at human speed; like the other mode levels it only steers a pin.
+    assign ESFLOPPY_COMM_BUS[4] = mirror_tx_en ? mirror_tx
+                                : (serve_hdd | ~wifi_present_menu) ? 1'b1 : GPIO[5];
     // ESFLOPPY_COMM_BUS[5] deliberately has no driver (see above)
     assign ESPROFILE_COMM_BUS[0] = serve_hdd;
     assign ESPROFILE_COMM_BUS[1] = serve_hdd ? GPIO[5] : 1'b0;           // WiFi board -> ESProFile
@@ -874,6 +894,7 @@ module top(
         .web_req(ctrl_web_req),
         .web_ack(ctrl_web_ack),
         .ctrl_status(ctrl_status),
+        .esf_btn_block(esf_btn_block),
         .cfg_pins({RAM_SEL, IO_ROM_SEL, CPU_ROM_SEL, INVID}),
         .cfg_ovr(lnet_cfg_ovr),
         .usbclk_fs(usbclk_fs),

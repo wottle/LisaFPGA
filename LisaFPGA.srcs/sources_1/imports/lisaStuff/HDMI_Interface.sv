@@ -67,8 +67,12 @@ module HDMI_Interface #(
     // 12 RAM size (0 = switches, 1-4 = 512K-2MB), 13 Serial B to the WiFi board. 10-12 only while the Lisa is off.
     input  logic [15:0] web_req,
     output logic        web_ack,
-    // The settings and state the WiFi board reads back, 13 bytes, registered; see the packing where it is built
-    output logic [103:0] ctrl_status = 104'd0,
+    // The settings and state the WiFi board reads back, 13 bytes, plus byte 13 (the menu's own state, for ESFloppy's
+    // OLED copy of the menu: see osd_mirror in lisanet_ctrl.sv), registered; see the packing where it is built
+    output logic [111:0] ctrl_status = 112'd0,
+    // High while the menu or adjust mode owns the buttons (and until they are all let go afterwards): top.sv then holds
+    // ESFloppy's copies of the buttons released, so a press meant for the menu never also drives ESFloppy's own screens
+    output logic        esf_btn_block = 1'b0,
     // Web-only overrides of machine jumpers/switches. cfg_pins are the raw pins {RAM_SEL[1:0], IO_ROM_SEL, CPU_ROM_SEL,
     // INVID}; cfg_ovr is {ram_user_set, ram_idx[1:0], io_rom_ovr, cpu_rom_ovr, invid_ovr}: top.sv XORs the three
     // toggles onto their pins and uses ram_idx in place of RAM_SEL when ram_user_set. Quasi-static: they change only on
@@ -1598,11 +1602,19 @@ module HDMI_Interface #(
     //   12     1:0 RAM size (effective, 0-3 = 512K-2MB), 3:2 RAM SIZE jumpers, 4 RAM size chosen on the web,
     //          5 Serial B to the WiFi board (the setting; top.sv only acts on it with a board present),
     //          6 the Serial B bench test (the real port wired to the WiFi board)
+    //   13     2:0 the highlighted menu item (0 ESP32 MODE .. 7 EXIT), 4 coarse step, 5 adjusting V (else H), 6 adjust mode,
+    //          7 the menu is open. Not sent to the WiFi board; osd_mirror sends bytes 0-13 to ESFloppy.
     // (lisanet_ctrl sends bytes 11-12 after the temperature, so WiFi firmware that predates them still parses the reply)
     logic [1:0] ram_eff;
     assign ram_eff = lnet_cfg_ram_user_set ? lnet_cfg_ram_idx : cfg_pins[4:3];
     always_ff @(posedge clk_pixel) begin
+        // ESFloppy's buttons: blocked from the moment the LEFT+RIGHT chord is down (so holding it to summon the menu
+        // can't auto-repeat on ESFloppy), while the menu or adjust mode is up, and then until every button is released,
+        // so the hold that closes the menu doesn't reach ESFloppy as fresh presses either
+        esf_btn_block <= ALIGNMENT_TUNING_MODE &&
+                         (summon_pressed || menu_active || tuning_active || (esf_btn_block && (btn_sync != 3'b111)));
         ctrl_status <= {
+            {menu_active, tuning_active, axis_y, coarse_step, 1'b0, menu_sel},
             {1'b0, serial_b_wifi == 2'd2, serial_b_wifi == 2'd1, lnet_cfg_ram_user_set, cfg_pins[4:3], ram_eff},
             {cfg_pins[2], cfg_pins[2] ^ lnet_cfg_io_rom_ovr, cfg_pins[1], CPU_ROM_SEL,
              cfg_pins[0], cfg_pins[0] ^ lnet_cfg_invid_ovr, scanlines, scanlines_eff},
