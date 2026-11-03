@@ -90,6 +90,7 @@ OLED file picker runs, so they work while the Lisa is on. Nothing here writes to
 | 0x51 | DRIVE_LIST | `u16 start_index`, path | as LIST, but only folders and the images this drive mode accepts (the OLED picker's filter: extension, hidden names, DC42 header or raw size) |
 | 0x52 | DRIVE_INSERT | `u8 drive`, path | — Status EXISTS (drive not empty, or ejecting), UI_BUSY (9: ESFloppy's own menu is open), BAD_IMAGE (10: not an image for this drive), IN_USE (11: in the other drive), NO_CONTIGUOUS, NOT_FOUND. The client must not retry it. |
 | 0x53 | DRIVE_EJECT | `u8 drive`, `u8 force` | — A Sony always force-ejects (it has no eject button; like a long SEL press). A Twiggy ejects normally (its eject button) unless `force`. NOT_FOUND if empty. |
+| 0x54 | WIFI_NOTICE | `u8 state` (1 = the WiFi board's setup network is up, 2 = it just joined a network), then four strings, each `u8 len` + bytes: network name, network password (empty for state 2), address, web page host name | — Floppy remote 0.4 and later. ESFloppy's OLED shows how to join the setup network (a QR code alternating with written instructions) or, after a join, where the web page is. The WiFi board repeats it every ~2 s (state 2 for ~20 s, or until its setup network goes off); ESFloppy drops it 6 s after the last one, and a button press hides it until the state changes. One try, 150 ms timeout: no reply means older firmware or a Manage mode, and the WiFi board then tries only every 10 s. |
 
 ## FPGA control frames
 

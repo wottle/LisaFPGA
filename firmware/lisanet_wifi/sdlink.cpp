@@ -276,4 +276,17 @@ int driveEject(uint8_t drive, bool force) {
     return call(0x53, a, 2, nullptr, 0, 1000, 1);
 }
 
+int wifiNotice(uint8_t state, const String &ssid, const String &pass, const String &addr, const String &host) {
+    uint8_t a[1 + 4 * 65];
+    size_t n = 0;
+    a[n++] = state;
+    for (const String *s : {&ssid, &pass, &addr, &host}) {
+        size_t k = s->length() < 64 ? s->length() : 64;
+        a[n++] = k;
+        memcpy(a + n, s->c_str(), k);
+        n += k;
+    }
+    return call(0x54, a, n, nullptr, 0, 150, 1);
+}
+
 }  // namespace sdlink

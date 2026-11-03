@@ -132,6 +132,13 @@ AI chat is off unless you turn it on here; while it is off, nothing is ever sent
 <button id="fwBack" hidden></button><progress id="fwProg" max="1" value="0" hidden></progress><span class="mut" id="fwT"></span></div>
 <p class="mut">Choose <b>lisanet_wifi.ino.bin</b> from the firmware's build folder (not the .merged.bin). The board restarts into it.
 A new version has to run for 20 s before it is kept: if it crashes sooner, the board goes back to this one by itself.</p></div>
+<div class="card"><h3>WiFi network and factory reset</h3>
+<div class="row"><button id="bForget">Forget the WiFi network...</button><button id="bFactory" class="danger">Erase the WiFi board's settings...</button></div>
+<p class="mut"><b>Forget the WiFi network</b> keeps every other setting, the web page password included, and restarts into the setup
+network <b>LisaNet-Setup</b> (password <b>lisanet-setup</b>) to choose a network again; ESFloppy's screen shows how to join it.</p>
+<p class="mut"><b>Erase</b> forgets the WiFi network, the web page password, the modem, FujiNet and AI chat settings (and its API keys), then restarts into the setup
+network <b>LisaNet-Setup</b> (password <b>lisanet-setup</b>), as on a new board; ESFloppy's screen shows how to join it. The installed
+firmware and the files on the SD cards are kept. Holding the XIAO's B button for 5 s forgets just the network and the web page password.</p></div>
 </section>
 <dialog id="ddlg"><p><b>Insert a disk</b> <span class="mut" id="dfor"></span></p>
 <div class="row"><select id="dsel" style="max-width:100%"><option value="">Scanning the card...</option></select></div>
@@ -402,6 +409,10 @@ $('fwFile').onchange=e=>{const f=e.target.files[0];e.target.value='';if(!f)retur
  x.onerror=()=>{$('fwProg').hidden=true;$('fwT').textContent='';msg('Upload failed',1);};x.send(f);};
 $('fwBack').onclick=()=>{if(!confirm($('fwBack').textContent+'? The board restarts.'))return;
  fdo(async()=>{await fpga('/api/fw/rollback',{method:'POST'});fwBack('Going back.');});};
+$('bForget').onclick=()=>{if(!confirm('Forget the WiFi network? The board restarts into the setup network LisaNet-Setup, and this page stops answering until a network is chosen there (log in with this page’s password). Everything else is kept.'))return;
+ fdo(async()=>{await fpga('/api/forgetwifi?confirm=forget',{method:'POST'});msg('Forgotten. The WiFi board is restarting into the setup network LisaNet-Setup (password lisanet-setup): join it to choose a network.');});};
+$('bFactory').onclick=()=>{if(!confirm('Erase all of the WiFi board’s settings, including its WiFi network and this page’s password? It restarts into the setup network LisaNet-Setup, and this page stops answering until the board is set up again.'))return;
+ fdo(async()=>{await fpga('/api/factoryreset?confirm=erase',{method:'POST'});msg('Erased. The WiFi board is restarting into the setup network LisaNet-Setup (password lisanet-setup): join it to set the board up again.');});};
 // ---- Floppy drive remote control: ESFloppy's drive firmware answers in Normal mode, Lisa on or off ----
 // Older ESFloppy firmware never answers; then only try again every 30 s, so the WiFi board isn't kept waiting.
 let dRetryAt=0,dBusy=false;

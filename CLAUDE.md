@@ -2,21 +2,20 @@
 
 ## Current state (2026-11-03) -- read this first
 
-**Git:** `fork/main` = `feature/lisanet-control` = the TV MENU commit (2026-11-03) (pushed to `mine` =
+**Git:** `fork/main` = `feature/lisanet-control` = the XIAO 0.21 commit (2026-11-03) (pushed to `mine` =
 github.com/wottle/LisaFPGA), working tree clean apart from untracked Vivado run files. Alex's upstream untouched.
 History note: `abaa663` (prebuilt XIAO images, another session) landed on `main` while 0.18 was in progress; 0.18 was
 rebased onto it (`a6c1e87`), the images refreshed (`0f60626`), and the pre-rebase copy `c28898f` merged in (`d839347`)
 rather than force-pushed -- so 0.18 appears twice in the log with identical content. **Before pushing, fetch and check
-that `mine/main` has no commits the branch lacks; force pushes are blocked here.** ESFloppy fork `main` = `lisanet` = `4f8daf9`, ESProFile fork `main` = `81f33f3`.
+that `mine/main` has no commits the branch lacks; force pushes are blocked here.** ESFloppy fork `main` = `lisanet` = `3c8c18c` (WiFi notice), ESProFile fork `main` = `81f33f3`.
 
 **On the board:**
 - FPGA: the TV MENU build (control version 4, below) = the COMMITTED `LisaFPGA.runs/impl_1/top.{bit,mcs}` (copy
   `tools/esp32_wifi_test/backup/fpga_tvmenu_2026-11-03.{bit,mcs}`), JTAG-tested and working (user, 2026-11-03);
   FLASHED 2026-11-03 (3 MHz, use_file; erase/program/verify OK; cold boot PASSED 2026-11-03: settings and a saved TV MENU OFF persist). WNS +0.165 / WHS +0.036.
-- ESFloppy: LisaNet firmware with the scrolling 9-row OLED menu copy (floppy remote 0.3), flashed 2026-11-03.
-  ESProFile: `81f33f3`.
-- XIAO: source and `release/` images are **0.19** ("Menu on the TV" checkbox, shown only with control version 4);
-  0.18 (below) was the last one confirmed installed. 0.18: the AI chat's reply timeout
+- ESFloppy: LisaNet firmware, floppy remote 0.4 (menu copy + WiFi notice), flashed 2026-11-03. ESProFile: `81f33f3`.
+- XIAO: **0.21 installed and working** (user, 2026-11-03) = source = `release/` images. 0.20 was built but never
+  installed (superseded before release). 0.19: "Menu on the TV" checkbox (control version 4). 0.18: the AI chat's reply timeout
   was really ~4.5 s -- `HTTPClient::setTimeout()` takes a **uint16_t** of ms, so the old 70000 wrapped to 4464; now a
   web setting *Reply timeout* (NVS "tmo", default 60, 10-65 s, 65535 ms being the ceiling) and a clear
   `[error: no answer within N s ...]` message. Long answers confirmed working. **Any `setTimeout` on this core's
@@ -34,6 +33,19 @@ that `mine/main` has no commits the branch lacks; force pushes are blocked here.
   ESP32S3 & Wio-SX1262 Meshtastic LoRa Dev Kit* (Amazon a.co/d/00z6Lj4b): only the XIAO is used, with the kit's 2.4 GHz
   antenna (the LARGER of its two, shipped on the XIAO; the small rectangular one is the LoRa board's); it ships pre-flashed with Meshtastic (hence the manual B+R download mode on the first flash). Noted in
   `firmware/lisanet_wifi/README.md`'s parts list.
+
+**Done 2026-11-03: WiFi setup help on ESFloppy's OLED + forget network / factory reset (XIAO 0.21, ESFloppy floppy
+remote 0.4; no FPGA change), all hardware-tested by the user incl. a phone scanning the QR code.** In Normal mode the
+FPGA already wires the XIAO's TX to ESFloppy, so the XIAO sends drive-remote cmd **0x54 WIFI_NOTICE** (state 1 setup
+network up / 2 just joined + ssid, pass, address, host; `wifisetup.cpp` `tellDrive()`, every 2 s, 150 ms timeout, 10 s
+backoff when nothing answers) and ESFloppy's `lisanetWifi.cpp` draws it: a QR code (`WIFI:T:WPA;S:..;P:..;;`, made at
+runtime by the ESP32 core's built-in `esp_qrcode_generate`, version 3 = 29 modules x 2 px in a lit 64 px square)
+alternating with written instructions, then WIFI CONNECTED with lisanet.local + IP while the setup network lingers
+(~1 min). Any button hides it and is swallowed until released (`ui.cpp`); the menu copy wins; never over ESFloppy's
+settings screen. AT+WSETUP while connected shows nothing (by design). Web Settings card: **Forget the WiFi network**
+(`/api/forgetwifi?confirm=forget`: ssid/pass only, web password kept) and **Erase the WiFi board's settings**
+(`/api/factoryreset?confirm=erase`: clears NVS "lisanet" except `prevver`, "fujinet", "chat"); both restart into
+LisaNet-Setup. The FPGA's saved settings are deliberately not touched.
 
 **Done 2026-11-03: TV MENU row (control version 4), hardware-tested on a JTAG load.** The menu is 9 rows now (ESP32
 MODE, RESOLUTION, ADJUST HORIZ, ADJUST VERT, CPU SPEED, MAX CONTRAST, **TV MENU**, SAVE SETTINGS, EXIT; `menu_sel` /

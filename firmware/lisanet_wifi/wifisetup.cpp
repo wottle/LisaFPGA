@@ -1,6 +1,8 @@
 // wifisetup -- see wifisetup.h. Written with an AI assistant.
 #include "wifisetup.h"
 #include "config.h"
+#include "sdlink.h"
+#include "fujinet.h"
 #include <WiFi.h>
 #include <DNSServer.h>
 #include <Preferences.h>
@@ -72,6 +74,25 @@ void factoryReset(const char *why) {
     startAP(why);
 }
 
+void eraseAllSettings() {
+    String prev = nvs.getString("prevver", "");                  // ota.cpp's: the name "Go back to x" shows
+    nvs.clear();
+    if (prev.length()) nvs.putString("prevver", prev);
+    for (const char *ns : {"fujinet", "chat"}) {
+        Preferences p;
+        if (p.begin(ns, false)) { p.clear(); p.end(); }
+    }
+    WiFi.disconnect(false, true);                                 // and any network the WiFi driver kept itself
+    Serial.println("[setup] every setting erased (factory reset)");
+}
+
+void forgetNetwork() {
+    nvs.remove("ssid");
+    nvs.remove("pass");
+    WiFi.disconnect(false, true);
+    Serial.println("[setup] WiFi network forgotten");
+}
+
 void requestJoin(const String &ssid, const String &pass) {
     joinSsid = ssid;
     joinPass = pass;
@@ -95,6 +116,35 @@ String statusJson() {
     for (char c : (up ? WiFi.SSID() : joinSsid)) { if (c == '"' || c == '\\') o += '\\'; if ((uint8_t)c >= 0x20) o += c; }
     o += "\",\"ip\":\"" + (up ? WiFi.localIP().toString() : String("")) + "\",\"mdns\":\"" MDNS_NAME ".local\"}";
     return o;
+}
+
+// WiFi setup help on ESFloppy's OLED: while the setup network is up (and the saved network is not joined), tell
+// ESFloppy's drive firmware how to reach it; once a network is joined from there, tell it where the web page is, until
+// the setup network goes off or for JOINED_NOTICE_MS. Repeated every NOTICE_EVERY_MS, since ESFloppy drops a notice
+// that stops coming (and may restart meanwhile). In a Manage mode, or with older ESFloppy firmware, nothing answers:
+// then try only every NOTICE_RETRY_MS, as each silent try holds this loop for the 150 ms timeout.
+static const uint32_t NOTICE_EVERY_MS = 2000, NOTICE_RETRY_MS = 10000, JOINED_NOTICE_MS = 20000;
+static bool noticeSetup = false;     // the setup notice has been sent since the last join
+static uint32_t joinedNoticeMs = 0;  // when the "joined" notice began (0 = not showing)
+static uint32_t nextNoticeMs = 0;
+
+static void tellDrive(uint32_t now, bool up) {
+    uint8_t state = 0;
+    if (ap && !up) {
+        state = 1;
+        noticeSetup = true;
+        joinedNoticeMs = 0;
+    } else if (up && noticeSetup) {
+        if (!joinedNoticeMs) joinedNoticeMs = now | 1;
+        if (ap || now - joinedNoticeMs < JOINED_NOTICE_MS) state = 2;
+        else { noticeSetup = false; joinedNoticeMs = 0; }
+    }
+    if (!state || (int32_t)(now - nextNoticeMs) < 0) return;
+    if (now - fujinet::lastActivityMs() < 3000) return;          // the Lisa is using the FujiNet: don't hold it up
+    int s = state == 1
+        ? sdlink::wifiNotice(1, SETUP_AP_SSID, SETUP_AP_PASS, WiFi.softAPIP().toString(), MDNS_NAME ".local")
+        : sdlink::wifiNotice(2, WiFi.SSID(), "", WiFi.localIP().toString(), MDNS_NAME ".local");
+    nextNoticeMs = now + (s == sdlink::OK ? NOTICE_EVERY_MS : NOTICE_RETRY_MS);
 }
 
 void poll() {
@@ -152,6 +202,8 @@ void poll() {
 
     // Joined while the setup network was up: let the phone read the result, then turn the setup network off
     if (ap && up && joinedAtMs && now - joinedAtMs > SETUP_AP_LINGER_MS) stopAP();
+
+    tellDrive(now, up);
 }
 
 }  // namespace wifisetup

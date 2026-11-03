@@ -22,11 +22,11 @@
 #pragma once
 
 #ifndef LISANET_WIFI_VERSION         // a test build can override it with -D
-#define LISANET_WIFI_VERSION "0.19"
+#define LISANET_WIFI_VERSION "0.21"
 #endif
 // What this version brought, shown next to the version on the web page. Rewrite it with every new version.
 #ifndef LISANET_WIFI_NOTES
-#define LISANET_WIFI_NOTES   "Menu on the TV switch (OLED-only menu)"
+#define LISANET_WIFI_NOTES   "WiFi setup help on ESFloppy's screen, forget network, factory reset"
 #endif
 
 #define LISA_RX_PIN   1        // D0

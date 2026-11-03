@@ -51,5 +51,8 @@ int driveStatus(DriveStatus &s);
 int driveList(const String &path, void (*fn)(const Entry &, void *), void *ctx);   // folders + images this drive takes
 int driveInsert(uint8_t drive, const String &path);   // not retried: a lost reply must not turn into "drive full"
 int driveEject(uint8_t drive, bool force);
+// WiFi setup help for ESFloppy's OLED (floppy remote 0.4 and later): state 1 = the setup network is up, 2 = just
+// joined a network. One try with a short timeout: anything but ESFloppy's drive firmware simply does not answer.
+int wifiNotice(uint8_t state, const String &ssid, const String &pass, const String &addr, const String &host);
 
 }  // namespace sdlink

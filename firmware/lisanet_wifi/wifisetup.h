@@ -22,6 +22,11 @@ void begin();
 void poll();                                      // call from loop()
 bool apActive();
 void factoryReset(const char *why);               // forget network + web password, start the setup network
+// Forget EVERY setting this board keeps (the "lisanet", "fujinet" and "chat" NVS namespaces) apart from the name of
+// the previous firmware for "Go back to x". The caller restarts the board, which then comes up in the setup network.
+void eraseAllSettings();
+// Forget only the saved WiFi network (the web password and every other setting stay). The caller restarts the board.
+void forgetNetwork();
 void startAP(const char *why);                    // bring up the setup network, keeping what is saved (AT+WSETUP)
 // Join a network from the setup page. Runs in the background; status() reports progress. Saved only once joined.
 void requestJoin(const String &ssid, const String &pass);

@@ -97,16 +97,20 @@ Switch the LisaFPGA **off** first. J21 is the 2x4 header; pin 1 is the square pa
 
 ## 5. Join your WiFi
 
-With no network saved, the XIAO starts its own:
+With no network saved, the XIAO starts its own, and ESFloppy's OLED shows how to join it (XIAO firmware 0.21 or later):
+a QR code, alternating every few seconds with the same details written out. Any of the three buttons hides it.
 
-1. Join **`LisaNet-Setup`** (password **`lisanet-setup`**) from a phone or computer. The setup page usually opens by
-   itself; otherwise browse to `http://192.168.4.1/setup`.
+1. Scan the QR code with a phone's camera, or join **`LisaNet-Setup`** (password **`lisanet-setup`**) by hand from a phone
+   or computer. The setup page usually opens by itself; otherwise browse to `http://192.168.4.1/setup`.
 2. Pick your network, enter its password, and choose a web page password (4 characters or more). The user name is `lisa`.
-3. Wait a minute, then browse to **`http://lisanet.local/`** (or the IP address shown on the XIAO's USB console).
+3. The OLED then shows **WIFI CONNECTED** with the page's address for about a minute: browse to
+   **`http://lisanet.local/`** (or the IP address shown there).
 
 **You should see:** the LisaNet page. The **Settings** tab shows the FPGA answering (temperature, resolution, CPU speed).
 If it says "The FPGA is not answering", check the D7 wire and the FPGA build. Holding the XIAO's B button for 5 seconds
-forgets the network and password and starts setup again.
+forgets the network and password and starts setup again. On the page's Settings tab, **Forget the WiFi network** does
+the same but keeps the password and every other setting, and **Erase the WiFi board's settings** also erases the XIAO's
+modem, FujiNet and AI chat settings.
 
 ## 6. Pick what the SD cards do
 

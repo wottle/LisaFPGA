@@ -131,10 +131,12 @@ restarts it). It prints `[lisanet] LisaNet WiFi board <version>` and then what W
 
 ## Getting it onto your WiFi
 
-With no network saved, the XIAO starts its own network:
+With no network saved, the XIAO starts its own network. ESFloppy's OLED shows how to join it while it is up (0.21, with
+ESFloppy's LisaNet firmware, floppy remote 0.4, in Normal mode): a QR code that joins it from a phone's camera, alternating
+with the details written out; then, once a network is joined, the page's address. Any button hides it.
 
-1. On a phone or computer, join **`LisaNet-Setup`**, password **`lisanet-setup`**. A phone usually pops up the setup page
-   by itself; otherwise browse to `http://192.168.4.1/setup`.
+1. On a phone or computer, join **`LisaNet-Setup`**, password **`lisanet-setup`** (or scan the OLED's QR code). A phone
+   usually pops up the setup page by itself; otherwise browse to `http://192.168.4.1/setup`.
 2. Pick your network, type its password, and choose a **web page password** (4 characters or more). The web page's
    user name is **`lisa`**.
 3. The XIAO joins your network and turns the setup network off a minute later.
@@ -144,6 +146,11 @@ Then browse to **`http://lisanet.local/`** (or the XIAO's IP address, shown on t
 - If the saved network cannot be found for a minute, the setup network comes back, and the XIAO keeps looking for the
   saved one every few minutes.
 - **Holding the B button for 5 seconds** forgets the network and the web password and starts setup from scratch.
+- **Settings -> Forget the WiFi network** (0.21) forgets only the network and restarts into the setup network; the web
+  page password and everything else stay (the setup page then asks for that password).
+- **Settings -> Erase the WiFi board's settings** (0.21) erases everything the XIAO keeps -- network, web password, modem,
+  FujiNet and AI chat settings and API keys -- and restarts into the setup network. The firmware, the SD cards and the
+  FPGA's own saved settings (the on-screen menu's) are not touched.
 - The same can be done with AT commands, on the USB console, or from LisaTerminal on Serial A while managing ESFloppy files:
   `AT+WSCAN`, `AT+WJOIN="network","password"`, `AT+WEBPASS="password"`.
 

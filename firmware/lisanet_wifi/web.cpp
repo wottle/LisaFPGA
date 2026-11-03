@@ -44,6 +44,9 @@
 //   GET  /api/fw                    this board's firmware: {"version","notes","slot","pending","canRollBack","prev"}
 //   POST /api/fw/update             raw body: a new lisanet_wifi.ino.bin; installed into the other slot, then a restart
 //   POST /api/fw/rollback           go back to the previous firmware, then a restart
+//   POST /api/factoryreset?confirm=erase   forget every setting of this board (network, web password, modem, FujiNet,
+//                                   AI chat), then restart into the setup network
+//   POST /api/forgetwifi?confirm=forget   forget only the WiFi network, then restart into the setup network
 // Errors are {"error":"..."} with 503 when ESFloppy can't be reached (ESP32 MODE not set to WIFI).
 //
 // Everything runs from loop() on one task, so the link to ESFloppy is never used by two things at once.
@@ -646,6 +649,24 @@ static void handleFwRollback() {
     ota::restartSoon();
 }
 
+static void handleFactoryReset() {
+    if (!authorized()) return;
+    if (server.arg("confirm") != "erase") { server.send(400, "application/json", "{\"error\":\"not confirmed\"}"); return; }
+    Serial.println("[web] factory reset requested from the web page");
+    server.send(200, "application/json", "{}");
+    wifisetup::eraseAllSettings();
+    ota::restartSoon();
+}
+
+static void handleForgetWifi() {
+    if (!authorized()) return;
+    if (server.arg("confirm") != "forget") { server.send(400, "application/json", "{\"error\":\"not confirmed\"}"); return; }
+    Serial.println("[web] forget the WiFi network, requested from the web page");
+    server.send(200, "application/json", "{}");
+    wifisetup::forgetNetwork();
+    ota::restartSoon();
+}
+
 void begin() {
     nvs.begin(NVS_NAMESPACE, false);                // read-write: the setup page can set the web password
     const char *keep[] = {"X-Path"};
@@ -682,6 +703,8 @@ void begin() {
     server.on("/api/fw", HTTP_GET, handleFwInfo);
     server.on("/api/fw/update", HTTP_POST, handleFwDone, handleFwBody);
     server.on("/api/fw/rollback", HTTP_POST, handleFwRollback);
+    server.on("/api/factoryreset", HTTP_POST, handleFactoryReset);
+    server.on("/api/forgetwifi", HTTP_POST, handleForgetWifi);
     server.on("/setup", HTTP_GET, handleSetupPage);
     server.on("/setup/info", HTTP_GET, handleSetupInfo);
     server.on("/setup/login", HTTP_POST, handleSetupLogin);
