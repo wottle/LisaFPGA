@@ -6,7 +6,7 @@ The Apple Lisa computer implemented inside an FPGA!
 # About This Fork (Lisa Mini)
 This is the [wottle/LisaFPGA](https://github.com/wottle/LisaFPGA) fork of Alex's LisaFPGA, built for the [Lisa Mini case](https://github.com/wottle/lisa-mini). On top of upstream it adds:
 - Image offset/alignment tuning and resolution modes, so the picture lands correctly in the case's screen opening.
-- An on-screen menu summoned by holding LEFT+RIGHT for about 3 seconds. ESFloppy's OLED shows a copy of it (a short splash, then the menu or the image-position readout), so you can read and change the settings there even when the monitor shows no picture. While the menu is up the buttons drive only the menu; ESFloppy ignores them and its own screen returns when the menu closes.
+- An on-screen menu summoned by holding LEFT+RIGHT for about 3 seconds. ESFloppy's OLED shows a copy of it (a short splash, then the menu or the image-position readout), so you can read and change the settings there even when the monitor shows no picture. The menu's TV MENU row (saved by SAVE SETTINGS) can turn the copy on the TV off, leaving only the OLED's; holding LEFT+RIGHT for about 6 seconds turns it back on. While the menu is up the buttons drive only the menu; ESFloppy ignores them and its own screen returns when the menu closes.
 - CPU speed selectable from the on-screen menu, overriding the SPEED SELECT switches and saved across power cycles.
 - A USB soft-CPU host with hub support, so keyboards and mice work through a USB hub.
 - Settings persistence in the configuration flash.

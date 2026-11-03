@@ -2,20 +2,21 @@
 
 ## Current state (2026-11-03) -- read this first
 
-**Git:** `fork/main` = `feature/lisanet-control` = the OLED menu-copy commit (2026-11-03) (pushed to `mine` =
+**Git:** `fork/main` = `feature/lisanet-control` = the TV MENU commit (2026-11-03) (pushed to `mine` =
 github.com/wottle/LisaFPGA), working tree clean apart from untracked Vivado run files. Alex's upstream untouched.
 History note: `abaa663` (prebuilt XIAO images, another session) landed on `main` while 0.18 was in progress; 0.18 was
 rebased onto it (`a6c1e87`), the images refreshed (`0f60626`), and the pre-rebase copy `c28898f` merged in (`d839347`)
 rather than force-pushed -- so 0.18 appears twice in the log with identical content. **Before pushing, fetch and check
-that `mine/main` has no commits the branch lacks; force pushes are blocked here.** ESFloppy fork `main` = `lisanet` = `88f8931`, ESProFile fork `main` = `81f33f3`.
+that `mine/main` has no commits the branch lacks; force pushes are blocked here.** ESFloppy fork `main` = `lisanet` = `4f8daf9`, ESProFile fork `main` = `81f33f3`.
 
 **On the board:**
-- FPGA: in FLASH still the FujiNet build (control version 3, `fpga_fujinet_2026-10-22.{bit,mcs}`). The OLED
-  menu-copy build (below) is JTAG-tested and WORKS (user, 2026-11-03) but is NOT yet flashed; its `top.{bit,mcs}` are
-  the COMMITTED `LisaFPGA.runs/impl_1` ones (copy `tools/esp32_wifi_test/backup/fpga_osdmirror_2026-11-02.{bit,mcs}`),
-  so `program_board.sh` users get it. Flash it (Lisa off, user's go-ahead) to match.
-- ESFloppy: LisaNet firmware with the OLED menu copy (floppy remote 0.2), flashed 2026-11-02. ESProFile: `81f33f3`.
-- XIAO: **0.18 installed and working** (user, 2026-10-30), matching the source. 0.18: the AI chat's reply timeout
+- FPGA: the TV MENU build (control version 4, below) = the COMMITTED `LisaFPGA.runs/impl_1/top.{bit,mcs}` (copy
+  `tools/esp32_wifi_test/backup/fpga_tvmenu_2026-11-03.{bit,mcs}`), JTAG-tested and working (user, 2026-11-03); see
+  the flash note under "Done 2026-11-03" for whether it is in flash yet. WNS +0.165 / WHS +0.036.
+- ESFloppy: LisaNet firmware with the scrolling 9-row OLED menu copy (floppy remote 0.3), flashed 2026-11-03.
+  ESProFile: `81f33f3`.
+- XIAO: source and `release/` images are **0.19** ("Menu on the TV" checkbox, shown only with control version 4);
+  0.18 (below) was the last one confirmed installed. 0.18: the AI chat's reply timeout
   was really ~4.5 s -- `HTTPClient::setTimeout()` takes a **uint16_t** of ms, so the old 70000 wrapped to 4464; now a
   web setting *Reply timeout* (NVS "tmo", default 60, 10-65 s, 65535 ms being the ceiling) and a clear
   `[error: no answer within N s ...]` message. Long answers confirmed working. **Any `setTimeout` on this core's
@@ -33,6 +34,16 @@ that `mine/main` has no commits the branch lacks; force pushes are blocked here.
   ESP32S3 & Wio-SX1262 Meshtastic LoRa Dev Kit* (Amazon a.co/d/00z6Lj4b): only the XIAO is used, with the kit's 2.4 GHz
   antenna (the LARGER of its two, shipped on the XIAO; the small rectangular one is the LoRa board's); it ships pre-flashed with Meshtastic (hence the manual B+R download mode on the first flash). Noted in
   `firmware/lisanet_wifi/README.md`'s parts list.
+
+**Done 2026-11-03: TV MENU row (control version 4), hardware-tested on a JTAG load.** The menu is 9 rows now (ESP32
+MODE, RESOLUTION, ADJUST HORIZ, ADJUST VERT, CPU SPEED, MAX CONTRAST, **TV MENU**, SAVE SETTINGS, EXIT; `menu_sel` /
+`m_row` / `m_item` 4 bits, `MENU_LAST` = 8, box 144 px tall, label_rom 16 rows). TV MENU OFF (`tv_menu_off`) stops
+the box being drawn on the TV (the adjust readout stays); saved in settings bit 62 (0 in older blocks = on). Holding
+LEFT+RIGHT to twice the summon time (~6 s; `summon_frames` keeps counting to 511) turns it back on and opens the menu,
+so a dead OLED cannot lock anyone out. Web: SET reg 14 (1 = on TV), status byte 12 bit 7 = off; byte 13 now carries
+the highlighted item in bits 3:0 (TV MENU 6, SAVE 7, EXIT 8). ESFloppy's copy scrolls (8 rows fit; the title line
+only shows when the list is shorter). XIAO 0.19 adds the checkbox. The menu-draw path at 1080p60 is the tight one
+(WNS fell from +0.568 to +0.165): pipeline `m_item` if the menu grows again.
 
 **Done 2026-11-02 .. 11-03: the on-screen menu on ESFloppy's OLED (replacement OLED fitted, works).** Hardware-tested
 on a JTAG load: splash, menu, highlight, settings, adjust readout, ESFloppy ignoring the buttons, its screen returning.

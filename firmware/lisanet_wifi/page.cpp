@@ -79,7 +79,8 @@ menu calls them WIFI FDD and WIFI HDD.)</div></div>
 <input type="number" id="sV" min="0"><button data-ax="3" data-d="1">&rsaquo;</button><button data-ax="3" data-d="8">&raquo;</button><span class="mut" id="sVl"></span></div>
 <div class="row"><label class="k" for="sCon">Max contrast</label><input type="checkbox" id="sCon"><span class="mut" id="sConJ"></span></div>
 <div class="row mach" hidden><label class="k" for="sScan">Scanlines</label><input type="checkbox" id="sScan"><span class="mut" id="sScanJ"></span></div>
-<div class="row mach" hidden><label class="k" for="sInv">Inverse video</label><input type="checkbox" id="sInv"><span class="mut" id="sInvJ"></span></div></div>
+<div class="row mach" hidden><label class="k" for="sInv">Inverse video</label><input type="checkbox" id="sInv"><span class="mut" id="sInvJ"></span></div>
+<div class="row tvm" hidden><label class="k" for="sTvm">Menu on the TV</label><input type="checkbox" id="sTvm"><span class="mut">(off: the on-screen menu shows only on ESFloppy's display; hold LEFT+RIGHT about 6 s to bring it back)</span></div></div>
 <div class="card"><h3>CPU speed</h3>
 <div class="row"><select id="sSpd"><option value="0">Follow the SPEED switches</option><option value="1">5 MHz</option><option value="2">10 MHz</option>
 <option value="3">15 MHz</option><option value="4">18.75 MHz</option></select></div></div>
@@ -278,6 +279,8 @@ function render(s){
  // Serial B to this board (FujiNet): FPGA control version 3
  const sb=s.version>=3;document.querySelectorAll('.sb').forEach(e=>e.hidden=!sb);
  if(sb&&document.activeElement!==$('sFn'))$('sFn').value=s.serialB;
+ // The menu on the TV or only on ESFloppy's OLED: FPGA control version 4
+ document.querySelectorAll('.tvm').forEach(e=>e.hidden=s.version<4);$('sTvm').checked=s.tvMenu!==false;
  // Jumper/switch overrides and NMI: only with an FPGA build that reports them (control version 2)
  const m=!!s.hasMachine;document.querySelectorAll('.mach').forEach(e=>e.hidden=!m);$('bNmi').hidden=!m;if(!m)return;
  const note=(eff,sw,what)=>'('+what+(eff!==sw?'; overridden here':'')+')';
@@ -360,6 +363,7 @@ $('sV').onchange=()=>fdo(()=>fset(3,Math.max(0,+$('sV').value||0)));
 $('sCon').onchange=()=>fdo(()=>fset(4,$('sCon').checked?1:0));
 $('sSpd').onchange=()=>fdo(()=>fset(5,+$('sSpd').value));
 $('sScan').onchange=()=>fdo(()=>fset(8,$('sScan').checked?1:0));
+$('sTvm').onchange=()=>fdo(()=>fset(14,$('sTvm').checked?1:0));
 $('sInv').onchange=()=>fdo(()=>fset(9,$('sInv').checked?1:0));
 document.querySelectorAll('#sCpuRom button').forEach(b=>b.onclick=()=>fdo(()=>fset(10,+b.dataset.v)));
 document.querySelectorAll('#sIoRom button').forEach(b=>b.onclick=()=>fdo(()=>fset(11,+b.dataset.v)));

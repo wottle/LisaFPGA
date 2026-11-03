@@ -110,6 +110,7 @@ int status(Status &s, int attempts) {
     s.rom3ASwitch = m & 0x20;  s.twiggy = m & 0x40;  s.twiggySwitch = m & 0x80;  // m bit 4 is rom3A, as in g
     s.ram = r & 0x03;  s.ramSwitch = (r >> 2) & 0x03;  s.ramUserSet = r & 0x10;
     s.serialB = s.version < 3 ? 0 : (r & 0x20) ? 1 : (r & 0x40) ? 2 : 0;
+    s.tvMenu = s.version < 4 || !(r & 0x80);
     return OK;
 }
 

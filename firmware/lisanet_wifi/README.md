@@ -6,7 +6,8 @@ Through a web page at `http://lisanet.local/` it lets you:
 - **Manage the SD cards** of the onboard floppy and hard disk emulators: list, upload, download, rename, delete,
   copy to `profile.image`, and choose the floppy ESFloppy mounts at start-up (**Files** tab, with the Lisa off).
 - **Change the LisaFPGA's settings** that the on-screen menu has: resolution, image position, CPU speed, contrast,
-  plus scanlines, inverse video, the ROM switches and the RAM size; save them; press the Lisa's power, reset and NMI
+  plus scanlines, inverse video, the ROM switches, the RAM size and whether the menu shows on the TV or only on
+  ESFloppy's OLED (0.19 with an FPGA build from 2026-11-03 on); save them; press the Lisa's power, reset and NMI
   buttons; and watch the FPGA's temperature (**Settings** tab).
 - **Insert and eject floppies** while the Lisa is running.
 - **Act as a FujiNet** on the Lisa's Serial B, for Lisa programs written for an RS-232 FujiNet, such as

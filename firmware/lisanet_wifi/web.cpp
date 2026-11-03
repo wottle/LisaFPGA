@@ -429,13 +429,13 @@ static void handleFpgaStatus() {
              "\"vLim\":%u,\"contrast\":%s,\"contrastJumper\":%s,\"speedUserSet\":%s,\"speedIdx\":%u,\"lisaOn\":%s,"
              "\"espMode\":%u,\"saved\":%s,\"saving\":%s,\"rom3A\":%s,\"tempC\":%.1f,\"hasMachine\":%s,"
              "\"scanlines\":%s,\"scanlinesJumper\":%s,\"inverse\":%s,\"inverseJumper\":%s,\"rom3ASwitch\":%s,"
-             "\"twiggy\":%s,\"twiggySwitch\":%s,\"ram\":%u,\"ramSwitch\":%u,\"ramUserSet\":%s,\"serialB\":%u}",
+             "\"twiggy\":%s,\"twiggySwitch\":%s,\"ram\":%u,\"ramSwitch\":%u,\"ramUserSet\":%s,\"serialB\":%u,\"tvMenu\":%s}",
              s.version, s.videoMode, s.has1024 ? "true" : "false", s.modeUserSet ? "true" : "false", s.hOff, s.hLim,
              s.vOff, s.vLim, s.contrast ? "true" : "false", s.contrastJumper ? "true" : "false",
              s.speedUserSet ? "true" : "false", s.speedIdx, s.lisaOn ? "true" : "false", s.espMode,
              s.saved ? "true" : "false", s.saving ? "true" : "false", s.rom3A ? "true" : "false", s.tempC,
              B(s.hasMachine), B(s.scanlines), B(s.scanlinesJumper), B(s.inverse), B(s.inverseJumper), B(s.rom3ASwitch),
-             B(s.twiggy), B(s.twiggySwitch), s.ram, s.ramSwitch, B(s.ramUserSet), s.serialB);
+             B(s.twiggy), B(s.twiggySwitch), s.ram, s.ramSwitch, B(s.ramUserSet), s.serialB, B(s.tvMenu));
     if (s.version >= 3) fujinet::noteRouted(s.serialB != 0);
     drivecache::noteMode(s.espMode);
     server.send(200, "application/json", o);
@@ -444,7 +444,7 @@ static void handleFpgaStatus() {
 static void handleFpgaSet() {
     if (!authorized()) return;
     long reg = server.arg("reg").toInt(), value = server.arg("value").toInt();
-    if (reg < 1 || reg == 7 || reg > 13 || value < 0 || value > 2047) { sendFpgaResult(fpgactl::BAD_REQUEST); return; }
+    if (reg < 1 || reg == 7 || reg > 14 || value < 0 || value > 2047) { sendFpgaResult(fpgactl::BAD_REQUEST); return; }
     int s = fpgactl::set((uint8_t)reg, (uint16_t)value);
     if (s == fpgactl::OK && reg == fpgactl::REG_ESPMODE) lastGood = 0;   // a different SD server (or none) now
     if (s == fpgactl::OK && reg == fpgactl::REG_ESPMODE) drivecache::noteMode((uint8_t)value);

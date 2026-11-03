@@ -131,8 +131,9 @@ SET registers, applied on the next video frame with the on-screen menu's limits 
 with the Lisa off. Version 3 adds 13 Serial B (0 its own port, 1 the SCC's channel B to the WiFi board on J21 GPIO2/3 for
 its FujiNet adapter -- taking those wires from the Serial A modem, 2 a bench test that wires the real Serial B port to
 the WiFi board instead; allowed while the Lisa is on, only acted on with a board present). 7 is reserved (save is
-ACTION 1). Settings saved from the web keep these in bits 64 and 74-79 of the settings block, and 13 = 1 in bit 63 (the
-bench test is never saved). Like the menu, changes last until power-off
+ACTION 1). Version 4 adds 14 the on-screen menu on the TV (1 shown, 0 only on ESFloppy's OLED; holding LEFT+RIGHT
+~6 s turns it back on). Settings saved from the web keep these in bits 64 and 74-79 of the settings block, 13 = 1 in
+bit 63 (the bench test is never saved) and 14 = 0 in bit 62. Like the menu, changes last until power-off
 unless saved.
 
 Status block (little-endian): 0 resolution; 1 flags (bit 0 max contrast, 1 Lisa on, 2 WiFi board present, 3 ESP32 WIFI,
@@ -141,7 +142,7 @@ Status block (little-endian): 0 resolution; 1 flags (bit 0 max contrast, 1 Lisa 
 Version 2: 11 bit 0 scanlines, 1 SCANLINES jumper, 2 inverse video, 3 INVERSE VIDEO jumper at INV, 4 3A CPU ROM (also
 in byte 2), 5 CPU ROM switch at 3A, 6 Twiggy I/O ROM, 7 I/O ROM switch at Twiggy; 12 bits 0-1 RAM size (0-3 =
 512K-2M), 2-3 the RAM SIZE jumpers, 4 RAM size set from the web; version 3: 12 bit 5 Serial B to the WiFi board, 6 the Serial B
-bench test. Effective values include the web's overrides.
+bench test; version 4: 12 bit 7 the menu is NOT drawn on the TV. Effective values include the web's overrides.
 
 ## Menu mirror frames (FPGA -> ESFloppy)
 
@@ -152,8 +153,9 @@ ESFloppy draws a copy of the on-screen menu on its OLED (ESFloppy `lisanetMenu.c
   held together until every button is let go after the menu closes, so menu presses never act on ESFloppy's screens;
 - sends frames on ESFloppy's link input (`ESFLOPPY_COMM_BUS[4]`) in the control-frame format above, one-way:
   `C3 3C 96 69 | 0x90 | 0x00 | 14 | status bytes 0-13 | CRC-32`. Status bytes 0-12 are as above; byte 13 is the menu:
-  bits 0-2 the highlighted item (0 ESP32 MODE, 1 RESOLUTION, 2 ADJUST HORIZ, 3 ADJUST VERT, 4 CPU SPEED,
-  5 MAX CONTRAST, 6 SAVE SETTINGS, 7 EXIT), 4 coarse step, 5 adjusting V (else H), 6 adjust mode, 7 the menu is open.
+  bits 0-3 the highlighted item (0 ESP32 MODE, 1 RESOLUTION, 2 ADJUST HORIZ, 3 ADJUST VERT, 4 CPU SPEED,
+  5 MAX CONTRAST, 6 TV MENU, 7 SAVE SETTINGS, 8 EXIT; the 2026-11-02 build had no TV MENU row and used bits 0-2, with
+  6 SAVE SETTINGS and 7 EXIT), 4 coarse step, 5 adjusting V (else H), 6 adjust mode, 7 the menu is open.
 
 Frames go out at once on a change (at most one per ~8 ms), every ~270 ms while the menu is up, and three times after it
 closes; ESFloppy drops its copy if none arrives for 800 ms. A frame starts only after the WiFi board's TX has been idle

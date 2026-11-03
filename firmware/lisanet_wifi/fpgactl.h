@@ -13,7 +13,9 @@ enum Reg : uint8_t { REG_VIDEO = 1, REG_HOFF = 2, REG_VOFF = 3, REG_CONTRAST = 4
                     // FPGA control version 2 and later; 10-12 only while the Lisa is off
                     REG_SCANLINES = 8, REG_INVERSE = 9, REG_CPUROM = 10, REG_IOROM = 11, REG_RAM = 12,
                     // version 3 and later
-                    REG_SERIALB = 13 };
+                    REG_SERIALB = 13,
+                    // version 4 and later: 1 = the on-screen menu shows on the TV, 0 = only on ESFloppy's OLED
+                    REG_TVMENU = 14 };
 enum Action : uint8_t { ACT_SAVE = 1, ACT_POWER = 2, ACT_RESET = 3, ACT_NMI = 4 };
 
 struct Status {
@@ -27,6 +29,7 @@ struct Status {
     uint8_t ram, ramSwitch;                             // 0-3 = 512K / 1M / 1.5M / 2M
     uint8_t serialB;                                    // version 3: Serial B to this board: 0 no, 1 the SCC's (FujiNet),
                                                         // 2 bench test (the real Serial B port wired to this board)
+    bool tvMenu;                                        // version 4: the on-screen menu is drawn on the TV (else OLED only)
 };
 
 int status(Status &s, int attempts = 3);
