@@ -100,7 +100,42 @@ LisaFuji's FnNOpen). Host test: `firmware/lisanet_wifi/test/test_chatcore.cpp` (
 
 **Open / next:** nothing in progress. Possible: suggest the OLED guard to
 Alex (user's OK pending); test the FujiNet above 19200 if wanted; the pre-existing `frame_width` 1-bit bug and the
-thermal margin (85-86 C without a fan, fan planned) below.
+thermal margin (85-86 C without a fan, fan planned) below. Declined by the user (2026-11-03): making the XIAO's factory
+reset also reset the FPGA's saved settings (a reset resolution could leave a blank screen) -- they stay separate.
+
+## How to build, load and flash on this Windows machine (all driven from the shell; no GUI needed)
+
+Ask the user before ANY JTAG load or flash write, and only with the Lisa switched off. Every load brings the emulated
+Lisa up OFF (USB is held in reset until it is switched on).
+- **Vivado 2026.1:** `C:/AMDDesignTools/2026.1/Vivado/bin/vivado.bat` (`xvlog.bat` beside it: syntax-check changed HDL
+  in seconds before committing to a build). Run in the background, it takes ~2 h:
+  `vivado.bat -mode batch -source tools/vivado_scripts/build_batch.tcl -log <scratch>/build.log` -- synth + impl +
+  bitstream + `top.mcs`, then `LisaFPGA.runs/impl_1/build_timing.rpt` / `build_util.rpt`. Judge it by WNS/WHS, 0
+  failing setup/hold endpoints and the 9 known pulse-width entries; verify new constraints BY EFFECT on
+  `top_routed.dcp`. Copy each tested build to `tools/esp32_wifi_test/backup/fpga_<name>_<date>.{bit,mcs}` (git-ignored).
+- **JTAG load (volatile):** `-source tools/vivado_scripts/jtag_load.tcl -tclargs <file.bit>` (default: the committed
+  top.bit); prints the DONE pin (`REGISTER.CONFIG_STATUS.BIT14_DONE_PIN`; `DONE_PIN` does not exist).
+- **Flash:** `-source tools/vivado_scripts/flash_board.tcl -tclargs <file.mcs>` (default: the committed top.mcs). Ends
+  with FLASH_OK; the board then needs a COLD power cycle (board switch). Once the user confirms it, commit the build (the "Rule" in the LisaNet
+  history below: `top.bit`, `top.mcs`, `top.prm`, `git add -u LisaFPGA.runs`).
+- **ESFloppy firmware** (`C:\Users\wottle\Documents\Development\ESFloppy`, branch `lisanet`; remotes `mine` =
+  wottle/ESFloppy, `origin` = Alex's; push `lisanet` and `lisanet:main` to `mine`):
+  `tools/toolchain/arduino-cli/arduino-cli.exe compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc" --output-dir build
+  ESFloppy` from the ESFloppy repo root (~5 min when the core rebuilds), then `... upload --fqbn <same> -p COM4
+  --input-dir build ESFloppy`. Check the upload prints MAC **ac:a7:04:04:78:94** (ESFloppy; COM numbers can move). The
+  upload (and opening COM4 at all) resets ESFloppy: only with the Lisa off or not using a disk. Never touch COM3
+  (ESProFile) unless meant. ESFloppy's "LisaNet floppy remote" version is in `lisanetDrive.cpp`'s DRIVE_STATUS string
+  (0.4 now): bump it when its link commands change. The ESP32 core's own components are linked by default, e.g.
+  `<qrcode.h>` (`esp_qrcode_generate`) -- check `esp32s3-libs/3.3.12/flags/ld_libs` before adding a library.
+- **XIAO firmware:** never over USB; follow "XIAO FIRMWARE CHANGES" in the LisaNet history below. **A version number handed to the user is used up even
+  if it was never installed** (0.20 was superseded before install, so the next was 0.21): bump again rather than
+  rebuild under the same number, and delete the stale release file.
+- **Web page JavaScript check** (no Node here): extract the `<script>` from `page.cpp`'s raw string, serve it with a
+  tiny PowerShell `HttpListener` on localhost (background task) to a page that runs `new Function(text)`, open it in
+  the browser pane, and expect "SYNTAX OK"; stop the listener afterwards. The browser pane cannot script `file://`.
+- **Gotchas in this shell:** sources may have CRLF line endings (use the Edit tool, not `perl -0pi ... \n`); in Git
+  Bash, `/paths` passed to Windows tools get rewritten unless `MSYS_NO_PATHCONV=1`; PowerShell quoting can turn a bare
+  `R` into Invoke-History -- prefer the Edit tool for file changes.
 
 ## LisaNet history (ESP32 WiFi mode) -- FPGA side built 2026-10-11, the XIAO firmware since; kept for the reasoning
 
